@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { countWords, readingMinutes } from '../../shared/text'
 import type { ExportFormat, MenuAction, ProjectSummary, Sheet, SheetSummary } from '../../shared/types'
 import { Editor, type EditorHandle } from './components/Editor'
-import { EyeIcon, FocusIcon, PlusIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
+import { EyeIcon, FocusIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
 import { MergeEditor } from './components/MergeEditor'
 import { Preview } from './components/Preview'
@@ -493,6 +493,7 @@ export default function App() {
   const project = projects.find((p) => p.id === projectId)
   const totalWords = sheets.reduce((sum, s) => sum + s.wordCount, 0)
   const previewSource = prefs.preview && current ? liveDoc.current.toString() : ''
+  const shortcutModifier = hermit.platform === 'darwin' ? '⌘' : 'Ctrl+'
 
   const style = {
     '--editor-font': FONTS[prefs.font],
@@ -536,34 +537,53 @@ export default function App() {
       <main className={`pane editor${prefs.focus ? ' focus-mode' : ''}`}>
         {/* Toolbar clicks shouldn't pull focus out of the editor. */}
         <header className="pane-header editor-toolbar" onMouseDown={(e) => e.preventDefault()}>
-          {!prefs.showLibrary && (
-            <button className="icon-button" onClick={() => togglePref('showLibrary')} title="Show Library (⌘1)">
+          <div className="pane-toggles" role="group" aria-label="Navigation panes">
+            <button
+              className="pane-toggle"
+              onClick={() => togglePref('showLibrary')}
+              aria-label={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar`}
+              aria-pressed={prefs.showLibrary}
+              title={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar (${shortcutModifier}1)`}
+            >
               <SidebarIcon />
+              <span>Projects</span>
             </button>
-          )}
+            <button
+              className="pane-toggle"
+              onClick={() => togglePref('showSheets')}
+              aria-label={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list`}
+              aria-pressed={prefs.showSheets}
+              title={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list (${shortcutModifier}2)`}
+            >
+              <SheetsIcon />
+              <span>Sheets</span>
+            </button>
+          </div>
           <div className="toolbar-spacer" />
-          <button
-            className={`icon-button${prefs.focus ? ' on' : ''}`}
-            onClick={() => togglePref('focus')}
-            title="Focus Mode (⇧⌘F)"
-          >
-            <FocusIcon />
-          </button>
-          <button
-            className={`icon-button${prefs.typewriter ? ' on' : ''}`}
-            onClick={() => togglePref('typewriter')}
-            title="Typewriter Mode (⇧⌘T)"
-          >
-            <TypewriterIcon />
-          </button>
-          <button
-            className={`icon-button${prefs.preview ? ' on' : ''}`}
-            onClick={() => togglePref('preview')}
-            disabled={!current}
-            title="Preview (⇧⌘P)"
-          >
-            <EyeIcon />
-          </button>
+          <div className="toolbar-modes">
+            <button
+              className={`icon-button${prefs.focus ? ' on' : ''}`}
+              onClick={() => togglePref('focus')}
+              title="Focus Mode (⇧⌘F)"
+            >
+              <FocusIcon />
+            </button>
+            <button
+              className={`icon-button${prefs.typewriter ? ' on' : ''}`}
+              onClick={() => togglePref('typewriter')}
+              title="Typewriter Mode (⇧⌘T)"
+            >
+              <TypewriterIcon />
+            </button>
+            <button
+              className={`icon-button${prefs.preview ? ' on' : ''}`}
+              onClick={() => togglePref('preview')}
+              disabled={!current}
+              title="Preview (⇧⌘P)"
+            >
+              <EyeIcon />
+            </button>
+          </div>
         </header>
 
         {conflicted && (

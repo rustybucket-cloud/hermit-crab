@@ -66,6 +66,13 @@ export const SidebarIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
+export const SheetsIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16M12 8h6M12 12h6M12 16h4" />
+  </svg>
+)
+
 export const CloseIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M6 6l12 12M18 6 6 18" />
