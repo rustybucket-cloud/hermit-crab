@@ -39,6 +39,8 @@ On Windows and Linux, use Ctrl in place of ⌘.
 
 ## Development
 
+Use pnpm 12.8.1, the version pinned in `package.json`. See the [pnpm installation instructions](https://pnpm.io/installation) if it is not installed.
+
 ```sh
 pnpm install
 pnpm dev        # run with hot reload
@@ -46,6 +48,8 @@ pnpm typecheck
 pnpm build      # production build into out/
 pnpm package    # distributable via electron-builder into dist/
 ```
+
+Dependencies use a hoisted layout, configured in `pnpm-workspace.yaml`, for Electron packaging compatibility. Commit changes to `pnpm-lock.yaml` when adding or updating dependencies; use `pnpm install --frozen-lockfile` for reproducible installs.
 
 The `dev` and `preview` commands download the Electron executable if it is missing. The first run may take longer; later runs reuse the installed executable.
 
