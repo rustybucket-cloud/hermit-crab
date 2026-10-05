@@ -2,14 +2,16 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'e
 import type { MenuItemConstructorOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { ContextMenuEntry, ExportFormat, MenuAction } from '../shared/types'
+import type { ContextMenuEntry, ExportFormat, MenuAction, SyncSettings } from '../shared/types'
 import { exportDocument } from './export'
 import { Library } from './library'
+import { GitSync, normalizeSyncSettings } from './sync'
 import { WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
 
 interface Settings {
   libraryPath?: string
   bounds?: Electron.Rectangle
+  sync?: SyncSettings
 }
 
 const isMac = process.platform === 'darwin'
@@ -17,9 +19,11 @@ const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
 
 let settings: Settings = {}
 let library: Library
+let sync: GitSync
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 let closeReady = false
+let closeTimer: NodeJS.Timeout | undefined
 
 async function loadSettings(): Promise<void> {
   try {
@@ -45,6 +49,46 @@ async function openLibrary(root: string): Promise<void> {
 
 function send(action: MenuAction): void {
   mainWindow?.webContents.send('menu', action)
+}
+
+// ── Sync ────────────────────────────────────────────────────────────────────
+
+let flushSeq = 0
+const flushWaiters = new Map<number, () => void>()
+
+ipcMain.on('sync:flushed', (_e, id: number) => flushWaiters.get(id)?.())
+
+/** Ask the renderer to save unsaved edits, so a commit or merge sees the latest text. */
+function flushRenderer(): Promise<void> {
+  const win = mainWindow
+  if (!win || win.isDestroyed() || win.webContents.isLoading()) return Promise.resolve()
+  const id = ++flushSeq
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer)
+      flushWaiters.delete(id)
+      resolve()
+    }
+    const timer = setTimeout(done, 3000)
+    flushWaiters.set(id, done)
+    win.webContents.send('sync:flush', id)
+  })
+}
+
+function createSync(): GitSync {
+  const emit = (channel: string, payload: unknown) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+  }
+  return new GitSync(library.root, normalizeSyncSettings(settings.sync), {
+    flush: flushRenderer,
+    emitState: (state) => emit('sync:state', state),
+    emitChanged: (paths) => paths.length && emit('sync:changed', paths),
+    emitAgentOutput: (chunk) => emit('sync:agent-output', chunk),
+    saveSettings: async (next) => {
+      settings.sync = next
+      await saveSettings()
+    }
+  })
 }
 
 // ── Window ──────────────────────────────────────────────────────────────────
@@ -74,6 +118,7 @@ function createWindow(): void {
   closeReady = false
 
   win.once('ready-to-show', () => win.show())
+  win.on('focus', () => sync.pullSoon())
 
   // Links (e.g. in preview) open in the user's browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -116,7 +161,7 @@ function createWindow(): void {
     if (closeReady) return
     event.preventDefault()
     win.webContents.send('app:before-close')
-    setTimeout(() => finishClose(win), 3000) // never hang if the renderer is unresponsive
+    closeTimer = setTimeout(() => finishClose(win), 3000) // never hang if the renderer is unresponsive
   })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
@@ -136,9 +181,13 @@ function finishClose(win: BrowserWindow): void {
   if (isQuitting) app.quit()
 }
 
-ipcMain.on('app:close-ready', (event) => {
+ipcMain.on('app:close-ready', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
-  if (win) finishClose(win)
+  if (!win) return
+  // Edits are on disk; give sync a few seconds to get them to GitHub too.
+  clearTimeout(closeTimer)
+  await Promise.race([sync.sync(), new Promise((resolve) => setTimeout(resolve, 5000))])
+  finishClose(win)
 })
 
 // ── Menu ────────────────────────────────────────────────────────────────────
@@ -153,6 +202,7 @@ async function chooseLibrary(): Promise<void> {
   settings.libraryPath = result.filePaths[0]
   await saveSettings()
   await openLibrary(settings.libraryPath)
+  await sync.setRoot(library.root)
   send('library-changed')
 }
 
@@ -174,6 +224,7 @@ function buildMenu(): void {
               { role: 'about' },
               { type: 'separator' },
               item('Settings…', 'open-settings', 'Cmd+,'),
+              item('Sync Now', 'sync-now', 'Cmd+Alt+S'),
               { type: 'separator' },
               { role: 'services' },
               { type: 'separator' },
@@ -198,7 +249,9 @@ function buildMenu(): void {
         { label: 'Show Library in Finder', click: () => shell.openPath(library.root) },
         { label: 'Change Library Location…', click: () => void chooseLibrary() },
         { type: 'separator' },
-        ...(isMac ? [] : [item('Settings…', 'open-settings', 'Ctrl+,'), { type: 'separator' } as const]),
+        ...(isMac
+          ? []
+          : [item('Settings…', 'open-settings', 'Ctrl+,'), item('Sync Now', 'sync-now', 'Ctrl+Alt+S'), { type: 'separator' } as const]),
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
     },
@@ -293,33 +346,42 @@ async function chooseExportFormat(): Promise<ExportFormat | undefined> {
   return formats[response]
 }
 
+/** Run a library change, then let sync know there's something to commit. */
+async function changed<T>(work: Promise<T>): Promise<T> {
+  const result = await work
+  sync.noteChange()
+  return result
+}
+
 function registerIpc(): void {
   ipcMain.handle('projects:list', () => library.listProjects())
-  ipcMain.handle('projects:create', (_e, name: string) => library.createProject(name))
-  ipcMain.handle('projects:rename', (_e, id: string, name: string) => library.renameProject(id, name))
+  ipcMain.handle('projects:create', (_e, name: string) => changed(library.createProject(name)))
+  ipcMain.handle('projects:rename', (_e, id: string, name: string) => changed(library.renameProject(id, name)))
   ipcMain.handle('projects:reveal', (_e, id: string) => library.revealProject(id))
   ipcMain.handle('projects:delete', async (_e, id: string) => {
     const ok = await confirm(`Move “${id}” to the Trash?`, 'The project folder and all of its sheets will be moved to the Trash.', 'Move to Trash')
-    if (ok) await library.deleteProject(id)
+    if (ok) await changed(library.deleteProject(id))
     return ok
   })
 
   ipcMain.handle('sheets:list', (_e, projectId: string) => library.listSheets(projectId))
   ipcMain.handle('sheets:read', (_e, projectId: string, id: string) => library.readSheet(projectId, id))
   ipcMain.handle('sheets:write', (_e, projectId: string, id: string, content: string) =>
-    library.writeSheet(projectId, id, content)
+    changed(library.writeSheet(projectId, id, content))
   )
   ipcMain.handle('sheets:create', (_e, projectId: string, content?: string, afterId?: string) =>
-    library.createSheet(projectId, content, afterId)
+    changed(library.createSheet(projectId, content, afterId))
   )
   ipcMain.handle('sheets:delete', async (_e, projectId: string, id: string) => {
     const sheet = await library.readSheet(projectId, id)
     const ok = await confirm(`Move “${sheet.title || 'Untitled'}” to the Trash?`, 'You can restore it from the Trash later.', 'Move to Trash')
-    if (ok) await library.deleteSheet(projectId, id)
+    if (ok) await changed(library.deleteSheet(projectId, id))
     return ok
   })
-  ipcMain.handle('sheets:reorder', (_e, projectId: string, order: string[]) => library.reorderSheets(projectId, order))
-  ipcMain.handle('sheets:move', (_e, from: string, id: string, to: string) => library.moveSheet(from, id, to))
+  ipcMain.handle('sheets:reorder', (_e, projectId: string, order: string[]) =>
+    changed(library.reorderSheets(projectId, order))
+  )
+  ipcMain.handle('sheets:move', (_e, from: string, id: string, to: string) => changed(library.moveSheet(from, id, to)))
   ipcMain.handle('sheets:search', (_e, projectId: string, query: string) => library.searchSheets(projectId, query))
 
   ipcMain.handle('export', async (_e, projectId: string, sheetIds: string[] | null, format?: ExportFormat) => {
@@ -328,6 +390,19 @@ function registerIpc(): void {
     const doc = await library.compile(projectId, sheetIds ?? undefined)
     return exportDocument(mainWindow, doc, format)
   })
+
+  ipcMain.handle('sync:state', () => sync.getState())
+  ipcMain.handle('sync:update-settings', (_e, patch: Partial<SyncSettings>) => sync.updateSettings(patch))
+  ipcMain.handle('sync:connect', (_e, url: string) => sync.connect(url))
+  ipcMain.handle('sync:now', async () => {
+    await sync.sync()
+    return sync.getState()
+  })
+  ipcMain.handle('sync:conflicts', () => sync.listConflicts())
+  ipcMain.handle('sync:resolve', (_e, file: string, content: string | null) => sync.resolveConflict(file, content))
+  ipcMain.handle('sync:finish-merge', () => sync.finishMerge())
+  ipcMain.handle('sync:agent', () => sync.resolveWithAgent())
+  ipcMain.handle('sync:cancel-agent', () => sync.cancelAgent())
 
   ipcMain.handle('context-menu', (event, entries: ContextMenuEntry[]) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
@@ -354,9 +429,11 @@ app.whenReady().then(async () => {
   await openLibrary(
     process.env['HERMIT_LIBRARY'] ?? settings.libraryPath ?? path.join(app.getPath('documents'), 'Hermit Crab')
   )
+  sync = createSync()
   registerIpc()
   buildMenu()
   createWindow()
+  void sync.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -366,6 +443,8 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   isQuitting = true
 })
+
+app.on('will-quit', () => sync?.stop())
 
 app.on('window-all-closed', () => {
   if (!isMac || isQuitting) app.quit()

@@ -1,5 +1,5 @@
 import { openSearchPanel } from '@codemirror/search'
-import { Compartment, EditorSelection, EditorState, type Text } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, Transaction, type Text } from '@codemirror/state'
 import { EditorView, type Command } from '@codemirror/view'
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
 import { baseExtensions, focusMode, typewriterMode } from '../editor/extensions'
@@ -8,6 +8,8 @@ export interface EditorHandle {
   focus(): void
   run(command: Command): void
   openSearch(): void
+  /** Swap in new text (e.g. pulled from GitHub) without moving the caret more than needed. */
+  replaceContent(text: string): void
 }
 
 interface Props {
@@ -19,6 +21,7 @@ interface Props {
   /** Font settings — passed so the editor can re-measure when they change. */
   fontKey: string
   hidden?: boolean
+  readOnly?: boolean
   onChange(doc: Text): void
   ref?: Ref<EditorHandle>
 }
@@ -26,18 +29,19 @@ interface Props {
 /** Caret and scroll position per sheet, so switching back lands where you left off. */
 const positions = new Map<string, { anchor: number; head: number; scrollTop: number }>()
 
-export function Editor({ docKey, content, focus, typewriter, fontKey, hidden, onChange, ref }: Props) {
+export function Editor({ docKey, content, focus, typewriter, fontKey, hidden, readOnly = false, onChange, ref }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const loadedKey = useRef<string | null>(null)
   const onChangeRef = useRef(onChange)
   const focusSlot = useRef(new Compartment())
   const typewriterSlot = useRef(new Compartment())
-  const modes = useRef({ focus, typewriter })
+  const readOnlySlot = useRef(new Compartment())
+  const modes = useRef({ focus, typewriter, readOnly })
 
   useEffect(() => {
     onChangeRef.current = onChange
-    modes.current = { focus, typewriter }
+    modes.current = { focus, typewriter, readOnly }
   })
 
   useImperativeHandle(ref, () => ({
@@ -47,6 +51,25 @@ export function Editor({ docKey, content, focus, typewriter, fontKey, hidden, on
     },
     openSearch: () => {
       if (view.current) openSearchPanel(view.current)
+    },
+    replaceContent: (text) => {
+      const v = view.current
+      if (!v) return
+      // Replace only the span that differs, so the selection maps through naturally.
+      const old = v.state.doc.toString()
+      let start = 0
+      while (start < old.length && start < text.length && old[start] === text[start]) start++
+      let endOld = old.length
+      let endNew = text.length
+      while (endOld > start && endNew > start && old[endOld - 1] === text[endNew - 1]) {
+        endOld--
+        endNew--
+      }
+      if (start === endOld && start === endNew) return
+      v.dispatch({
+        changes: { from: start, to: endOld, insert: text.slice(start, endNew) },
+        annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)]
+      })
     }
   }))
 
@@ -66,8 +89,11 @@ export function Editor({ docKey, content, focus, typewriter, fontKey, hidden, on
         baseExtensions(),
         focusSlot.current.of(modes.current.focus ? focusMode : []),
         typewriterSlot.current.of(modes.current.typewriter ? typewriterMode : []),
+        readOnlySlot.current.of(EditorState.readOnly.of(modes.current.readOnly)),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) onChangeRef.current(update.state.doc)
+          // Remote changes are already on disk; don't save them back.
+          const local = update.transactions.some((tr) => tr.docChanged && !tr.annotation(Transaction.remote))
+          if (local) onChangeRef.current(update.state.doc)
         })
       ]
     })
@@ -104,6 +130,10 @@ export function Editor({ docKey, content, focus, typewriter, fontKey, hidden, on
       ]
     })
   }, [typewriter])
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: readOnlySlot.current.reconfigure(EditorState.readOnly.of(readOnly)) })
+  }, [readOnly])
 
   useEffect(() => {
     view.current?.requestMeasure()

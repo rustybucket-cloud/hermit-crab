@@ -5,11 +5,13 @@ import type { ExportFormat, MenuAction, ProjectSummary, Sheet, SheetSummary } fr
 import { Editor, type EditorHandle } from './components/Editor'
 import { EyeIcon, FocusIcon, PlusIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
+import { MergeEditor } from './components/MergeEditor'
 import { Preview } from './components/Preview'
-import { SettingsOverlay } from './components/SettingsOverlay'
+import { SettingsOverlay, type SettingsTab } from './components/SettingsOverlay'
 import { SheetListPane } from './components/SheetListPane'
 import { formatCommands } from './editor/extensions'
 import { formatCount } from './format'
+import { sheetPath, syncLabel, timeAgo, useSyncState } from './sync'
 import { useTheme } from './theme'
 
 const hermit = window.hermit
@@ -77,6 +79,9 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [theme, setTheme] = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
+  const sync = useSyncState()
+  const [mergeOpen, setMergeOpen] = useState(false)
 
   const editor = useRef<EditorHandle>(null)
   const pending = useRef<{ projectId: string; sheetId: string; doc: Text } | null>(null)
@@ -189,6 +194,52 @@ export default function App() {
   useEffect(() => {
     void init()
   }, [init])
+
+  // ── Sync ──────────────────────────────────────────────────────────────────
+
+  /** A pull changed files on disk: refresh the lists and the open sheet. */
+  const handleSyncChanged = async (paths: string[]) => {
+    const list = await refreshProjects()
+    if (!projectId || !list.some((p) => p.id === projectId)) {
+      await openProject(list[0]?.id ?? null)
+      return
+    }
+    const sheetList = await refreshSheets(projectId)
+    if (!current || current.projectId !== projectId) return
+    const id = current.sheet.id
+    if (!paths.includes(sheetPath(projectId, id))) return
+
+    // Anything typed in the moment since sync saved this sheet would overwrite what was just pulled.
+    discardPending((p) => p.projectId === projectId && p.sheetId === id)
+    if (!sheetList.some((s) => s.id === id)) {
+      await openSheet(projectId, sheetList[0]?.id ?? null)
+      return
+    }
+    const sheet = await hermit.readSheet(projectId, id)
+    editor.current?.replaceContent(sheet.content)
+    liveDoc.current = sheet.content
+    setStats({ words: sheet.wordCount, chars: sheet.content.length })
+  }
+
+  const syncChangedHandler = useRef(handleSyncChanged)
+  useEffect(() => {
+    syncChangedHandler.current = handleSyncChanged
+  })
+  useEffect(() => hermit.onSyncChanged((paths) => void syncChangedHandler.current(paths)), [])
+  useEffect(() => hermit.onSyncFlush(flush), [flush])
+
+  // Open the merge editor as soon as a pull runs into conflicts.
+  const lastSyncStatus = useRef(sync?.status)
+  useEffect(() => {
+    const was = lastSyncStatus.current
+    lastSyncStatus.current = sync?.status
+    if (was === 'syncing' && sync?.status === 'conflict') {
+      setSettingsOpen(false)
+      setMergeOpen(true)
+    }
+  }, [sync?.status])
+
+  const conflicted = Boolean(current && sync?.conflicts.includes(sheetPath(current.projectId, current.sheet.id)))
 
   // ── Search ────────────────────────────────────────────────────────────────
 
@@ -364,14 +415,34 @@ export default function App() {
 
   // ── Menu + lifecycle wiring ───────────────────────────────────────────────
 
+  const openSettings = (tab: SettingsTab) => {
+    setSettingsTab(tab)
+    setSettingsOpen(true)
+  }
+
   const closeSettings = () => {
     setSettingsOpen(false)
     if (!prefs.preview) editor.current?.focus()
   }
 
+  const openMerge = () => {
+    setSettingsOpen(false)
+    setMergeOpen(true)
+  }
+
+  const closeMerge = () => {
+    setMergeOpen(false)
+    if (!prefs.preview) editor.current?.focus()
+  }
+
+  const syncStatusClick = () => {
+    if (sync?.status === 'conflict' || sync?.status === 'resolving') openMerge()
+    else openSettings('sync')
+  }
+
   const handleMenu = (action: MenuAction) => {
     // The editor sits under the settings overlay; don't edit it blind.
-    const editable = !prefs.preview && !settingsOpen
+    const editable = !prefs.preview && !settingsOpen && !mergeOpen && !conflicted
     const run = (cmd: keyof typeof formatCommands) => editable && editor.current?.run(formatCommands[cmd])
     switch (action) {
       case 'new-sheet': return void createSheet()
@@ -399,7 +470,11 @@ export default function App() {
       case 'format-link': return run('link')
       case 'format-heading': return run('heading')
       case 'format-quote': return run('quote')
-      case 'open-settings': return setSettingsOpen(true)
+      case 'open-settings': return openSettings('appearance')
+      case 'sync-now':
+        if (sync?.status === 'conflict') return setMergeOpen(true)
+        if (sync?.remoteUrl && sync.settings.enabled) return void hermit.syncNow()
+        return openSettings('sync')
       case 'library-changed':
         pending.current = null
         return void init()
@@ -433,7 +508,7 @@ export default function App() {
           renamingId={renamingProject}
           onSelect={(id) => id !== projectId && void openProject(id)}
           onCreate={() => void createProject()}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettings('appearance')}
           onRename={(id, name) => void renameProject(id, name)}
           onRenameEnd={() => setRenamingProject(null)}
           onStartRename={setRenamingProject}
@@ -491,6 +566,15 @@ export default function App() {
           </button>
         </header>
 
+        {conflicted && (
+          <div className="conflict-banner">
+            <span>This sheet changed here and on GitHub. It’s read-only until the conflict is resolved.</span>
+            <button className="ghost-button" onClick={openMerge}>
+              Resolve…
+            </button>
+          </div>
+        )}
+
         <div className="editor-body">
           {current ? (
             <>
@@ -502,6 +586,7 @@ export default function App() {
                 typewriter={prefs.typewriter}
                 fontKey={`${prefs.font}:${prefs.fontSize}`}
                 hidden={prefs.preview}
+                readOnly={conflicted}
                 onChange={handleChange}
               />
               {prefs.preview && <Preview markdown={previewSource} />}
@@ -537,11 +622,35 @@ export default function App() {
             <span className={`save-state ${saveState}`}>
               {saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Not saved — retrying on next edit' : 'Saving…'}
             </span>
+            {syncLabel(sync) && (
+              <button
+                className={`sync-state ${sync!.status}`}
+                onClick={syncStatusClick}
+                title={
+                  sync!.status === 'idle' && sync!.lastSyncedAt
+                    ? `Synced with GitHub ${timeAgo(sync!.lastSyncedAt)}`
+                    : (sync!.message ?? 'GitHub sync')
+                }
+              >
+                {syncLabel(sync)}
+              </button>
+            )}
           </footer>
         )}
       </main>
 
-      {settingsOpen && <SettingsOverlay theme={theme} onChange={setTheme} onClose={closeSettings} />}
+      {settingsOpen && (
+        <SettingsOverlay
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
+          theme={theme}
+          onChange={setTheme}
+          sync={sync}
+          onOpenMerge={openMerge}
+          onClose={closeSettings}
+        />
+      )}
+      {mergeOpen && sync && <MergeEditor sync={sync} onClose={closeMerge} />}
     </div>
   )
 }

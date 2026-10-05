@@ -57,7 +57,51 @@ export type MenuAction =
   | 'format-heading'
   | 'format-quote'
   | 'open-settings'
+  | 'sync-now'
   | 'library-changed'
+
+export type SyncAgent = 'claude' | 'codex'
+
+/** How the library syncs with its GitHub remote. Lives in the main process settings file. */
+export interface SyncSettings {
+  enabled: boolean
+  branch: string
+  /** Seconds of quiet after an edit before changes are committed and pushed. */
+  commitDelay: number
+  /** Minutes between checks for changes on GitHub. */
+  pullInterval: number
+  agent: SyncAgent
+  /** Hand new conflicts straight to the agent, then open the merge editor to review. */
+  autoResolve: boolean
+}
+
+export type SyncStatus = 'off' | 'idle' | 'syncing' | 'conflict' | 'resolving' | 'error'
+
+export interface SyncState {
+  settings: SyncSettings
+  gitAvailable: boolean
+  /** Which conflict helpers are installed on this machine. */
+  agents: Record<SyncAgent, boolean>
+  remoteUrl: string | null
+  status: SyncStatus
+  message?: string
+  lastSyncedAt?: number
+  /** Library-relative paths with unresolved conflicts. */
+  conflicts: string[]
+}
+
+export interface ConflictFile {
+  /** Library-relative path, always with forward slashes. */
+  path: string
+  /** A readable name: the sheet title and its project. */
+  label: string
+  /** This Mac's version, or null if it was deleted here. */
+  ours: string | null
+  /** GitHub's version, or null if it was deleted there. */
+  theirs: string | null
+  /** The file as it is on disk, with conflict markers. */
+  content: string
+}
 
 /** The API the preload script exposes to the renderer as `window.hermit`. */
 export interface HermitApi {
@@ -78,6 +122,25 @@ export interface HermitApi {
   /** Without a format, the user is asked to pick one. */
   exportSheets(projectId: string, sheetIds: string[] | null, format?: ExportFormat): Promise<string | null>
   showContextMenu(items: ContextMenuEntry[]): Promise<string | null>
+  getSyncState(): Promise<SyncState>
+  updateSyncSettings(patch: Partial<SyncSettings>): Promise<SyncState>
+  /** Point the library at a GitHub repository and run a first sync. */
+  connectSync(remoteUrl: string): Promise<SyncState>
+  syncNow(): Promise<SyncState>
+  listConflicts(): Promise<ConflictFile[]>
+  /** Write a resolved file (or delete it, with null) and mark it resolved. */
+  resolveConflict(path: string, content: string | null): Promise<SyncState>
+  /** Commit the merge once every file is resolved, then push. */
+  finishMerge(): Promise<SyncState>
+  /** Ask Claude Code or Codex to resolve the conflict markers on disk. Resolves with the agent's output. */
+  resolveWithAgent(): Promise<{ ok: boolean; output: string }>
+  cancelAgent(): Promise<void>
+  onSyncState(listener: (state: SyncState) => void): () => void
+  /** Files a pull changed on disk, so open sheets can reload. */
+  onSyncChanged(listener: (paths: string[]) => void): () => void
+  /** Main asks the renderer to save unsaved edits before it commits or merges. */
+  onSyncFlush(listener: () => Promise<void>): () => void
+  onAgentOutput(listener: (chunk: string) => void): () => void
   onMenu(listener: (action: MenuAction) => void): () => void
   onBeforeClose(listener: () => Promise<void>): () => void
 }

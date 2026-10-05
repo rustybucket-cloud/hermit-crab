@@ -12,17 +12,30 @@ import {
   type ThemeId,
   type ThemeSettings
 } from '../theme'
+import type { SyncState } from '../../../shared/types'
 import { CloseIcon, PlusIcon } from './Icons'
+import { SyncSettings } from './SyncSettings'
 
 const hermit = window.hermit
 
+export type SettingsTab = 'appearance' | 'sync'
+
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'sync', label: 'Sync' }
+]
+
 interface Props {
+  tab: SettingsTab
+  onTabChange(tab: SettingsTab): void
   theme: ThemeSettings
   onChange(theme: ThemeSettings): void
+  sync: SyncState | null
+  onOpenMerge(): void
   onClose(): void
 }
 
-export function SettingsOverlay({ theme, onChange, onClose }: Props) {
+export function SettingsOverlay({ tab, onTabChange, theme, onChange, sync, onOpenMerge, onClose }: Props) {
   const systemDark = useSystemDark()
   const colors = resolveColors(theme, systemDark)
   const [editing, setEditing] = useState<ColorSlot | null>(null)
@@ -68,69 +81,88 @@ export function SettingsOverlay({ theme, onChange, onClose }: Props) {
       <div className="settings" role="dialog" aria-label="Settings" tabIndex={-1} ref={dialog}>
         <header className="settings-header">
           <h1>Settings</h1>
+          <nav className="settings-tabs" role="tablist">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                className={tab === t.id ? 'selected' : ''}
+                onClick={() => onTabChange(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
           <button className="icon-button" onClick={onClose} title="Close (Esc)">
             <CloseIcon />
           </button>
         </header>
 
         <div className="settings-body">
-          <section className="settings-section">
-            <h2>Theme</h2>
-            <div className="theme-grid">
-              {cards.map((card) => (
-                <button
-                  key={card.id}
-                  className={`theme-card${theme.id === card.id ? ' selected' : ''}`}
-                  onClick={() => onChange({ ...theme, id: card.id })}
-                >
-                  {Array.isArray(card.colors) ? (
-                    <span className="theme-thumb split">
-                      <ThemeThumb colors={card.colors[0]} />
-                      <ThemeThumb colors={card.colors[1]} />
-                    </span>
-                  ) : (
-                    <span className="theme-thumb">
-                      <ThemeThumb colors={card.colors} />
-                    </span>
-                  )}
-                  <span className="theme-name">{card.name}</span>
-                </button>
-              ))}
-            </div>
-            <p className="settings-hint">
-              {theme.id === 'system'
-                ? `Following your system’s ${systemDark ? 'dark' : 'light'} appearance. Change any colour below to make it your own.`
-                : theme.id === 'custom'
-                  ? 'Your custom theme. Pick colours from the palette, or add your own.'
-                  : `Change any colour below to start a custom theme from ${PRESETS[theme.id].name}.`}
-            </p>
-          </section>
-
-          {SLOTS.map(({ group, slots }) => (
-            <section className="settings-section" key={group}>
-              <h3>{group}</h3>
-              <div className="color-rows">
-                {slots.map(({ key, label }) => (
-                  <div key={key} className={`color-row${editing === key ? ' open' : ''}`}>
-                    <button className="color-row-button" onClick={() => setEditing(editing === key ? null : key)}>
-                      <span className="swatch" style={{ background: colors[key] }} />
-                      <span className="color-label">{label}</span>
-                      <span className="color-hex">{colors[key]}</span>
+          {tab === 'sync' ? (
+            <SyncSettings sync={sync} onOpenMerge={onOpenMerge} />
+          ) : (
+            <>
+              <section className="settings-section">
+                <h2>Theme</h2>
+                <div className="theme-grid">
+                  {cards.map((card) => (
+                    <button
+                      key={card.id}
+                      className={`theme-card${theme.id === card.id ? ' selected' : ''}`}
+                      onClick={() => onChange({ ...theme, id: card.id })}
+                    >
+                      {Array.isArray(card.colors) ? (
+                        <span className="theme-thumb split">
+                          <ThemeThumb colors={card.colors[0]} />
+                          <ThemeThumb colors={card.colors[1]} />
+                        </span>
+                      ) : (
+                        <span className="theme-thumb">
+                          <ThemeThumb colors={card.colors} />
+                        </span>
+                      )}
+                      <span className="theme-name">{card.name}</span>
                     </button>
-                    {editing === key && (
-                      <ColorPicker
-                        value={colors[key]}
-                        swatches={theme.swatches}
-                        onPick={(hex) => setColor(key, hex)}
-                        onAddSwatch={addSwatch}
-                        onRemoveSwatch={(hex) => void removeSwatch(hex)}
-                      />
-                    )}
+                  ))}
+                </div>
+                <p className="settings-hint">
+                  {theme.id === 'system'
+                    ? `Following your system’s ${systemDark ? 'dark' : 'light'} appearance. Change any colour below to make it your own.`
+                    : theme.id === 'custom'
+                      ? 'Your custom theme. Pick colours from the palette, or add your own.'
+                      : `Change any colour below to start a custom theme from ${PRESETS[theme.id].name}.`}
+                </p>
+              </section>
+
+              {SLOTS.map(({ group, slots }) => (
+                <section className="settings-section" key={group}>
+                  <h3>{group}</h3>
+                  <div className="color-rows">
+                    {slots.map(({ key, label }) => (
+                      <div key={key} className={`color-row${editing === key ? ' open' : ''}`}>
+                        <button className="color-row-button" onClick={() => setEditing(editing === key ? null : key)}>
+                          <span className="swatch" style={{ background: colors[key] }} />
+                          <span className="color-label">{label}</span>
+                          <span className="color-hex">{colors[key]}</span>
+                        </button>
+                        {editing === key && (
+                          <ColorPicker
+                            value={colors[key]}
+                            swatches={theme.swatches}
+                            onPick={(hex) => setColor(key, hex)}
+                            onAddSwatch={addSwatch}
+                            onRemoveSwatch={(hex) => void removeSwatch(hex)}
+                          />
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </section>
-          ))}
+                </section>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { HermitApi, MenuAction } from '../shared/types'
 
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const handler = (_: Electron.IpcRendererEvent, payload: T) => listener(payload)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.off(channel, handler)
+}
+
 const api: HermitApi = {
   platform: process.platform,
   listProjects: () => ipcRenderer.invoke('projects:list'),
@@ -18,6 +24,31 @@ const api: HermitApi = {
   searchSheets: (projectId, query) => ipcRenderer.invoke('sheets:search', projectId, query),
   exportSheets: (projectId, sheetIds, format) => ipcRenderer.invoke('export', projectId, sheetIds, format),
   showContextMenu: (items) => ipcRenderer.invoke('context-menu', items),
+  getSyncState: () => ipcRenderer.invoke('sync:state'),
+  updateSyncSettings: (patch) => ipcRenderer.invoke('sync:update-settings', patch),
+  connectSync: (url) => ipcRenderer.invoke('sync:connect', url),
+  syncNow: () => ipcRenderer.invoke('sync:now'),
+  listConflicts: () => ipcRenderer.invoke('sync:conflicts'),
+  resolveConflict: (path, content) => ipcRenderer.invoke('sync:resolve', path, content),
+  finishMerge: () => ipcRenderer.invoke('sync:finish-merge'),
+  resolveWithAgent: () => ipcRenderer.invoke('sync:agent'),
+  cancelAgent: () => ipcRenderer.invoke('sync:cancel-agent'),
+
+  onSyncState: (listener) => subscribe('sync:state', listener),
+  onSyncChanged: (listener) => subscribe('sync:changed', listener),
+  onAgentOutput: (listener) => subscribe('sync:agent-output', listener),
+
+  onSyncFlush(listener) {
+    const handler = async (_: Electron.IpcRendererEvent, id: number) => {
+      try {
+        await listener()
+      } finally {
+        ipcRenderer.send('sync:flushed', id)
+      }
+    }
+    ipcRenderer.on('sync:flush', handler)
+    return () => ipcRenderer.off('sync:flush', handler)
+  },
 
   onMenu(listener) {
     const handler = (_: Electron.IpcRendererEvent, action: MenuAction) => listener(action)

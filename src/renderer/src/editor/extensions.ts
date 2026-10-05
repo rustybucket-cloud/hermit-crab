@@ -276,3 +276,19 @@ export function baseExtensions(): Extension[] {
     ])
   ]
 }
+
+/**
+ * For the merge editor's result pane: the same look without Markdown styling,
+ * since conflict markers would otherwise parse as setext headings and quotes.
+ */
+export function plainExtensions(): Extension[] {
+  return [
+    history(),
+    drawSelection(),
+    EditorView.lineWrapping,
+    EditorView.contentAttributes.of({ spellcheck: 'true' }),
+    search({ top: false }),
+    theme,
+    keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab])
+  ]
+}

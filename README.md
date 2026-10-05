@@ -15,6 +15,7 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 - **Organise.** Drag sheets to reorder them, or drop a sheet onto another project to move it there. Right-click projects and sheets for more options. Search a project by full text.
 - **Export** a sheet or a whole project as Markdown, HTML or PDF. Sheets are joined in order.
 - **Themes.** Follow the system's light or dark appearance, pick a preset (Sepia, Rosé, Midnight, Forest…), or build your own in **Settings** by choosing background and text colours from a palette or any custom colour. Colours you save are kept for reuse.
+- **GitHub sync.** In **Settings → Sync**, connect the library to a GitHub repository. Hermit Crab commits and pushes shortly after you pause writing, pulls on a timer and whenever you return to the app, and reloads open sheets in place. It uses your own `git`, so any repository you can already push to works. When the same sheet changed in both places, a merge editor lets you pick a side per conflict or edit the result. Claude Code or Codex, running locally, can take a first pass, and you review its changes before they're synced.
 - Live word count, character count and reading time; spellcheck with suggestions; adjustable editor font and size.
 
 ## Shortcuts
@@ -32,6 +33,7 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 | Text size | ⌘+ / ⌘- / ⌘0 |
 | Export sheet | ⇧⌘E |
 | Settings | ⌘, |
+| Sync now | ⌥⌘S |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 
@@ -51,7 +53,7 @@ Set `HERMIT_LIBRARY=/some/folder` to point the app at a different library (handy
 
 ```
 src/
-  main/       Electron main process: window, menus, IPC, library (filesystem) and export
+  main/       Electron main process: window, menus, IPC, library (filesystem), export and git sync
   preload/    contextBridge API exposed to the renderer as window.hermit
   renderer/   React UI and CodeMirror editor
   shared/     Types and text helpers used by both sides
