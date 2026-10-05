@@ -7,12 +7,13 @@
   "author": "rustybucket-cloud",
   "license": "MIT",
   "private": true,
+  "packageManager": "pnpm@12.8.1",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "package": "npm run build && electron-builder"
+    "package": "pnpm build && electron-builder"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
@@ -39,12 +40,6 @@
     "marked": "^18.0.14",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
-  },
-  "allowScripts": {
-    "esbuild@0.25.12": true,
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": true,
-    "electron-winstaller@5.4.0": true
   },
   "build": {
     "appId": "com.hermitcrab.app",

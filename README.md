@@ -36,11 +36,11 @@ On Windows and Linux, use Ctrl in place of ⌘.
 ## Development
 
 ```sh
-npm install
-npm run dev        # run with hot reload
-npm run typecheck
-npm run build      # production build into out/
-npm run package    # distributable via electron-builder into dist/
+pnpm install
+pnpm dev        # run with hot reload
+pnpm typecheck
+pnpm build      # production build into out/
+pnpm package    # distributable via electron-builder into dist/
 ```
 
 Set `HERMIT_LIBRARY=/some/folder` to point the app at a different library (handy for testing). You can also change the library from **File → Change Library Location…**.
