@@ -6,9 +6,11 @@ import { Editor, type EditorHandle } from './components/Editor'
 import { EyeIcon, FocusIcon, PlusIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
 import { Preview } from './components/Preview'
+import { SettingsOverlay } from './components/SettingsOverlay'
 import { SheetListPane } from './components/SheetListPane'
 import { formatCommands } from './editor/extensions'
 import { formatCount } from './format'
+import { useTheme } from './theme'
 
 const hermit = window.hermit
 
@@ -73,6 +75,8 @@ export default function App() {
   const [stats, setStats] = useState({ words: 0, chars: 0 })
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [ready, setReady] = useState(false)
+  const [theme, setTheme] = useTheme()
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const editor = useRef<EditorHandle>(null)
   const pending = useRef<{ projectId: string; sheetId: string; doc: Text } | null>(null)
@@ -360,8 +364,15 @@ export default function App() {
 
   // ── Menu + lifecycle wiring ───────────────────────────────────────────────
 
+  const closeSettings = () => {
+    setSettingsOpen(false)
+    if (!prefs.preview) editor.current?.focus()
+  }
+
   const handleMenu = (action: MenuAction) => {
-    const run = (cmd: keyof typeof formatCommands) => !prefs.preview && editor.current?.run(formatCommands[cmd])
+    // The editor sits under the settings overlay; don't edit it blind.
+    const editable = !prefs.preview && !settingsOpen
+    const run = (cmd: keyof typeof formatCommands) => editable && editor.current?.run(formatCommands[cmd])
     switch (action) {
       case 'new-sheet': return void createSheet()
       case 'new-project': return void createProject()
@@ -379,7 +390,7 @@ export default function App() {
       case 'font-bigger': return setPrefs((p) => ({ ...p, fontSize: Math.min(30, p.fontSize + 1) }))
       case 'font-smaller': return setPrefs((p) => ({ ...p, fontSize: Math.max(12, p.fontSize - 1) }))
       case 'font-reset': return setPrefs((p) => ({ ...p, fontSize: DEFAULT_PREFS.fontSize }))
-      case 'find': return !prefs.preview && editor.current?.openSearch()
+      case 'find': return editable && editor.current?.openSearch()
       case 'next-sheet': return stepSheet(1)
       case 'prev-sheet': return stepSheet(-1)
       case 'format-bold': return run('bold')
@@ -388,6 +399,7 @@ export default function App() {
       case 'format-link': return run('link')
       case 'format-heading': return run('heading')
       case 'format-quote': return run('quote')
+      case 'open-settings': return setSettingsOpen(true)
       case 'library-changed':
         pending.current = null
         return void init()
@@ -421,6 +433,7 @@ export default function App() {
           renamingId={renamingProject}
           onSelect={(id) => id !== projectId && void openProject(id)}
           onCreate={() => void createProject()}
+          onOpenSettings={() => setSettingsOpen(true)}
           onRename={(id, name) => void renameProject(id, name)}
           onRenameEnd={() => setRenamingProject(null)}
           onStartRename={setRenamingProject}
@@ -527,6 +540,8 @@ export default function App() {
           </footer>
         )}
       </main>
+
+      {settingsOpen && <SettingsOverlay theme={theme} onChange={setTheme} onClose={closeSettings} />}
     </div>
   )
 }

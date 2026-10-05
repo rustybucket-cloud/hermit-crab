@@ -14,7 +14,8 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 - **Preview** of the rendered Markdown.
 - **Organise.** Drag sheets to reorder them, or drop a sheet onto another project to move it there. Right-click projects and sheets for more options. Search a project by full text.
 - **Export** a sheet or a whole project as Markdown, HTML or PDF. Sheets are joined in order.
-- Live word count, character count and reading time; light and dark themes that follow the system; spellcheck with suggestions; adjustable editor font and size.
+- **Themes.** Follow the system's light or dark appearance, pick a preset (Sepia, Rosé, Midnight, Forest…), or build your own in **Settings** by choosing background and text colours from a palette or any custom colour. Colours you save are kept for reuse.
+- Live word count, character count and reading time; spellcheck with suggestions; adjustable editor font and size.
 
 ## Shortcuts
 
@@ -30,6 +31,7 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 | Preview / focus / typewriter | ⇧⌘P / ⇧⌘F / ⇧⌘T |
 | Text size | ⌘+ / ⌘- / ⌘0 |
 | Export sheet | ⇧⌘E |
+| Settings | ⌘, |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 

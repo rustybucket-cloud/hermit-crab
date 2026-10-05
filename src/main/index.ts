@@ -166,7 +166,26 @@ function buildMenu(): void {
     }) satisfies MenuItemConstructorOptions
 
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: 'appMenu' } as MenuItemConstructorOptions] : []),
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              item('Settings…', 'open-settings', 'Cmd+,'),
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' }
+            ]
+          } satisfies MenuItemConstructorOptions
+        ]
+      : []),
     {
       label: 'File',
       submenu: [
@@ -179,6 +198,7 @@ function buildMenu(): void {
         { label: 'Show Library in Finder', click: () => shell.openPath(library.root) },
         { label: 'Change Library Location…', click: () => void chooseLibrary() },
         { type: 'separator' },
+        ...(isMac ? [] : [item('Settings…', 'open-settings', 'Ctrl+,'), { type: 'separator' } as const]),
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
     },

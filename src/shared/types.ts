@@ -56,6 +56,7 @@ export type MenuAction =
   | 'format-link'
   | 'format-heading'
   | 'format-quote'
+  | 'open-settings'
   | 'library-changed'
 
 /** The API the preload script exposes to the renderer as `window.hermit`. */

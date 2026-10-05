@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ProjectSummary } from '../../../shared/types'
-import { FolderIcon, PlusIcon } from './Icons'
+import { FolderIcon, GearIcon, PlusIcon } from './Icons'
 
 export const SHEET_DRAG_TYPE = 'application/x-hermit-sheet'
 
@@ -10,6 +10,7 @@ interface Props {
   renamingId: string | null
   onSelect(id: string): void
   onCreate(): void
+  onOpenSettings(): void
   onRename(id: string, name: string): void
   onRenameEnd(): void
   onStartRename(id: string): void
@@ -71,6 +72,9 @@ export function LibraryPane(props: Props) {
       <footer className="library-footer">
         <button className="ghost-button" onClick={props.onCreate} title="New Project (⇧⌘N)">
           <PlusIcon /> New Project
+        </button>
+        <button className="icon-button" onClick={props.onOpenSettings} title="Settings (⌘,)">
+          <GearIcon />
         </button>
       </footer>
     </aside>
