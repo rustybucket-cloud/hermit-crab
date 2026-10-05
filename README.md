@@ -47,6 +47,8 @@ pnpm build      # production build into out/
 pnpm package    # distributable via electron-builder into dist/
 ```
 
+The `dev` and `preview` commands download the Electron executable if it is missing. The first run may take longer; later runs reuse the installed executable.
+
 Set `HERMIT_LIBRARY=/some/folder` to point the app at a different library (handy for testing). You can also change the library from **File → Change Library Location…**.
 
 ### Layout
