@@ -26,6 +26,7 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 | Find in sheet | ⌘F |
 | Previous / next sheet | ⌥⌘↑ / ⌥⌘↓ |
 | Toggle library / sheet list | ⌘1 / ⌘2 |
+| Hide / show both sidebars | ⌘\ |
 | Preview / focus / typewriter | ⇧⌘P / ⇧⌘F / ⇧⌘T |
 | Text size | ⌘+ / ⌘- / ⌘0 |
 | Export sheet | ⇧⌘E |

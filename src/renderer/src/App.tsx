@@ -351,6 +351,13 @@ export default function App() {
   const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'focus' | 'typewriter') =>
     setPrefs((p) => ({ ...p, [key]: !p[key] }))
 
+  // Hide both side panes if either is showing; otherwise bring both back.
+  const toggleSidebars = () =>
+    setPrefs((p) => {
+      const show = !p.showLibrary && !p.showSheets
+      return { ...p, showLibrary: show, showSheets: show }
+    })
+
   // ── Menu + lifecycle wiring ───────────────────────────────────────────────
 
   const handleMenu = (action: MenuAction) => {
@@ -362,6 +369,7 @@ export default function App() {
       case 'export-project': return projectId && void exportSheets(projectId, null)
       case 'toggle-library': return togglePref('showLibrary')
       case 'toggle-sheets': return togglePref('showSheets')
+      case 'toggle-sidebars': return toggleSidebars()
       case 'toggle-preview': return current && togglePref('preview')
       case 'toggle-focus': return togglePref('focus')
       case 'toggle-typewriter': return togglePref('typewriter')

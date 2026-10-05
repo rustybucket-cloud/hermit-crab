@@ -37,6 +37,7 @@ export type MenuAction =
   | 'export-project'
   | 'toggle-library'
   | 'toggle-sheets'
+  | 'toggle-sidebars'
   | 'toggle-preview'
   | 'toggle-focus'
   | 'toggle-typewriter'

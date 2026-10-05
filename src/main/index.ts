@@ -214,6 +214,7 @@ function buildMenu(): void {
       submenu: [
         item('Toggle Library', 'toggle-library', 'CmdOrCtrl+1'),
         item('Toggle Sheet List', 'toggle-sheets', 'CmdOrCtrl+2'),
+        item('Toggle Sidebars', 'toggle-sidebars', 'CmdOrCtrl+\\'),
         { type: 'separator' },
         item('Toggle Preview', 'toggle-preview', 'CmdOrCtrl+Shift+P'),
         item('Focus Mode', 'toggle-focus', 'CmdOrCtrl+Shift+F'),
