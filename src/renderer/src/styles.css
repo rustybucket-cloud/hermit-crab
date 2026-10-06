@@ -709,6 +709,12 @@ button {
   margin: 0;
 }
 
+.editor-empty-error {
+  max-width: 420px;
+  text-align: center;
+  line-height: 1.5;
+}
+
 .status-bar {
   flex: none;
   display: flex;

@@ -9,6 +9,9 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 
 const api: HermitApi = {
   platform: process.platform,
+  getLibraryLocation: () => ipcRenderer.invoke('library:location'),
+  chooseLibraryLocation: () => ipcRenderer.invoke('library:choose'),
+  revealLibrary: () => ipcRenderer.invoke('library:reveal'),
   listProjects: () => ipcRenderer.invoke('projects:list'),
   createProject: (name, folder) => ipcRenderer.invoke('projects:create', name, folder),
   renameProject: (projectId, name) => ipcRenderer.invoke('projects:rename', projectId, name),

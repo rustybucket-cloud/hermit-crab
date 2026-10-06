@@ -51,17 +51,19 @@ async function saveSettings(): Promise<void> {
   await fs.writeFile(settingsFile(), JSON.stringify(settings, null, 2))
 }
 
+/** Only switches to the new library once it's ready, so a folder that can't be opened leaves the old one in place. */
 async function openLibrary(root: string): Promise<void> {
-  library = new Library(root)
-  const existed = await library.ensure()
+  const next = new Library(root)
+  const existed = await next.ensure()
   if (!existed) {
-    const project = await library.createProject(WELCOME_PROJECT)
-    for (const content of WELCOME_SHEETS) await library.createSheet(project.id, content)
+    const project = await next.createProject(WELCOME_PROJECT)
+    for (const content of WELCOME_SHEETS) await next.createSheet(project.id, content)
     const notes = { section: 'notes', subsection: null } as const
     const created = []
-    for (const content of WELCOME_NOTES) created.push(await library.createSheet(project.id, content, undefined, notes))
-    await library.createCanvas(project.id, notes, 'Planning Board', WELCOME_CANVAS(`${created[0].id}.md`))
+    for (const content of WELCOME_NOTES) created.push(await next.createSheet(project.id, content, undefined, notes))
+    await next.createCanvas(project.id, notes, 'Planning Board', WELCOME_CANVAS(`${created[0].id}.md`))
   }
+  library = next
 }
 
 // ── Library files ───────────────────────────────────────────────────────────
@@ -237,18 +239,23 @@ ipcMain.on('app:close-ready', async (event) => {
 
 // ── Menu ────────────────────────────────────────────────────────────────────
 
-async function chooseLibrary(): Promise<void> {
+/** Resolves with the new library's folder, or null if the user cancelled. */
+async function chooseLibrary(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
     title: 'Choose Library Folder',
+    defaultPath: library.root,
     properties: ['openDirectory', 'createDirectory']
   }
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
-  if (result.canceled || !result.filePaths[0]) return
-  settings.libraryPath = result.filePaths[0]
+  if (result.canceled || !result.filePaths[0]) return null
+  // Save edits into the library they belong to before switching.
+  await flushRenderer()
+  await openLibrary(result.filePaths[0])
+  settings.libraryPath = library.root
   await saveSettings()
-  await openLibrary(settings.libraryPath)
   await sync.setRoot(library.root)
   send('library-changed')
+  return library.root
 }
 
 function buildMenu(): void {
@@ -437,6 +444,9 @@ function registerIpc(): void {
     if (ok) await changed(library.deleteFolder(folder))
     return ok
   })
+  ipcMain.handle('library:location', () => library.root)
+  ipcMain.handle('library:choose', () => chooseLibrary())
+  ipcMain.handle('library:reveal', () => shell.openPath(library.root).then(() => undefined))
   ipcMain.handle('library:move', (_e, libraryPath: string, folder: string | null) =>
     changed(library.moveInLibrary(libraryPath, folder))
   )

@@ -154,6 +154,11 @@ export interface ConflictFile {
 /** The API the preload script exposes to the renderer as `window.hermit`. */
 export interface HermitApi {
   platform: string
+  /** The library's folder on disk. */
+  getLibraryLocation(): Promise<string>
+  /** Ask the user for a new library folder and switch to it. Resolves with the folder, or null if cancelled. */
+  chooseLibraryLocation(): Promise<string | null>
+  revealLibrary(): Promise<void>
   listProjects(): Promise<ProjectSummary[]>
   createProject(name: string, folder?: string | null): Promise<ProjectSummary>
   renameProject(projectId: string, name: string): Promise<ProjectSummary>

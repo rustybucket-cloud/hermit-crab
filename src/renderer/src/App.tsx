@@ -126,6 +126,7 @@ export default function App() {
   const [stats, setStats] = useState<Stats>({ words: 0, chars: 0 })
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [ready, setReady] = useState(false)
+  const [libraryError, setLibraryError] = useState<string | null>(null)
   const [theme, setTheme] = useTheme()
   useThemedIcon(theme)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -189,11 +190,21 @@ export default function App() {
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
+  /** On failure, keeps the last lists and reports why instead of throwing. */
   const refreshProjects = useCallback(async () => {
-    const [list, folderList] = await Promise.all([hermit.listProjects(), hermit.listFolders()])
-    setProjects(list)
-    setFolders(folderList)
-    return list
+    try {
+      const [list, folderList] = await Promise.all([hermit.listProjects(), hermit.listFolders()])
+      setProjects(list)
+      setFolders(folderList)
+      setLibraryError(null)
+      return list
+    } catch (err) {
+      console.error('Reading the library failed', err)
+      // IPC wraps the main process's error: "Error invoking remote method 'x': Error: <message>"
+      const message = err instanceof Error ? err.message : String(err)
+      setLibraryError(message.replace(/^Error invoking remote method '[^']*': (Error: )?/, ''))
+      return []
+    }
   }, [])
 
   const refreshSheets = useCallback(async (pid: string) => {
@@ -1038,7 +1049,19 @@ export default function App() {
           ) : (
             ready && (
               <div className="editor-empty">
-                {projects.length === 0 ? (
+                {libraryError && projects.length === 0 ? (
+                  <>
+                    <p className="editor-empty-error">{libraryError}</p>
+                    <div className="field-row">
+                      <button className="primary-button" onClick={() => void init()}>
+                        Try Again
+                      </button>
+                      <button className="ghost-button" onClick={() => openSettings('library')}>
+                        Change Location…
+                      </button>
+                    </div>
+                  </>
+                ) : projects.length === 0 ? (
                   <>
                     <p>Your library is empty.</p>
                     <button className="primary-button" onClick={() => void createProject()}>
