@@ -14,6 +14,18 @@ import type {
   SheetSummary
 } from '../shared/types'
 import { countWords, summarize } from '../shared/text'
+import {
+  canvasText,
+  canvasTitle,
+  CANVAS_EXT,
+  EMPTY_CANVAS,
+  isCanvasId,
+  parseCanvas,
+  relinkCanvas,
+  serializeCanvas,
+  sheetFile,
+  summarizeCanvas
+} from '../shared/canvas'
 
 /**
  * A library is a plain folder. Every sub-folder is a project and every `.md`
@@ -30,11 +42,18 @@ import { countWords, summarize } from '../shared/text'
  * project, as one list of sheet ids and folder paths (which end in `/`). Keeping
  * folders in the list also keeps empty subsections, which git drops, across a sync.
  * The same file holds the project's settings, so they travel with it.
+ *
+ * Notes can also be canvases: `.canvas` files in the JSON Canvas format. A canvas is
+ * named after its file, so its id keeps the extension: `Notes/Plot.canvas`. Images
+ * placed on a canvas are copied into the project's `Attachments` folder.
  */
 
 const META_FILE = '.hermit.json'
 const FOLDER_MARKER = '.hermit-folder'
 const NOTES_DIR = 'Notes'
+const ATTACHMENTS_DIR = 'Attachments'
+/** Folders at the top of a project that aren't content subsections. */
+const RESERVED_DIRS = [NOTES_DIR, ATTACHMENTS_DIR]
 
 interface ProjectMeta {
   settings: ProjectSettings
@@ -97,6 +116,8 @@ function newSheetId(place: SheetPlace): string {
   return sheetIdIn(place, `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`)
 }
 
+const isNotesFolder = (folder: string) => folder.split('/')[0] === NOTES_DIR
+
 const samePlace = (a: SheetPlace, b: SheetPlace) => a.section === b.section && a.subsection === b.subsection
 
 /** An item's entry in the project's order list. Folders end in `/` so they never clash with sheets. */
@@ -133,8 +154,19 @@ async function writeAtomic(file: string, content: string): Promise<void> {
 /** `format` is the project's; notes are always Markdown. */
 function toSummary(id: string, content: string, updatedAt: number, format: ContentFormat): SheetSummary {
   const { section, subsection } = locate(id)
+  if (isCanvasId(id)) return { id, section, subsection, title: canvasTitle(id), ...summarizeCanvas(content), updatedAt }
   const { title, excerpt } = summarize(content, section === 'content' ? format : 'markdown')
   return { id, section, subsection, title, excerpt, wordCount: countWords(content), updatedAt }
+}
+
+/** The text search looks through: a canvas's cards, or a sheet's Markdown. */
+function searchableText(id: string, content: string): string {
+  if (!isCanvasId(id)) return content
+  try {
+    return `${canvasTitle(id)}\n${canvasText(parseCanvas(content))}`
+  } catch {
+    return content
+  }
 }
 
 interface Folder {
@@ -179,14 +211,29 @@ export class Library {
   private placeDir(projectId: string, place: SheetPlace): string {
     const folder = folderOf(place)
     // A content subsection called Notes would be the notes folder.
-    if (place.section === 'content' && folder.split('/')[0] === NOTES_DIR) throw new Error(`Invalid subsection: ${folder}`)
+    if (place.section === 'content' && RESERVED_DIRS.includes(folder.split('/')[0])) {
+      throw new Error(`Invalid subsection: ${folder}`)
+    }
     placeOfFolder(folder)
     return this.folderDir(projectId, folder)
   }
 
   private sheetPath(projectId: string, sheetId: string): string {
     locate(sheetId)
-    return path.join(this.projectDir(projectId), `${sheetId}.md`)
+    return path.join(this.projectDir(projectId), sheetFile(sheetId))
+  }
+
+  /** An id like `sheetId`, in `place`, that no file is using. Canvases keep their name, numbered. */
+  private async freeSheetId(projectId: string, place: SheetPlace, sheetId: string): Promise<string> {
+    const name = locate(sheetId).name
+    let target = sheetIdIn(place, name)
+    if (!isCanvasId(sheetId)) {
+      while (await exists(this.sheetPath(projectId, target))) target = newSheetId(place)
+      return target
+    }
+    const base = name.slice(0, -CANVAS_EXT.length)
+    for (let n = 2; await exists(this.sheetPath(projectId, target)); n++) target = sheetIdIn(place, `${base} ${n}${CANVAS_EXT}`)
+    return target
   }
 
   private async readMeta(projectId: string): Promise<ProjectMeta> {
@@ -348,14 +395,19 @@ export class Library {
       if (err.code === 'ENOENT' && folder) return []
       throw err
     })
-    const files = entries.filter((e) => e.isFile() && e.name.endsWith('.md') && !e.name.startsWith('.'))
-    const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && (folder || e.name !== NOTES_DIR))
+    // Canvases belong with the notes; the content is only Markdown.
+    const isSheet = (name: string) => name.endsWith('.md') || (isNotesFolder(folder) && name.endsWith(CANVAS_EXT))
+    const files = entries.filter((e) => e.isFile() && isSheet(e.name) && !e.name.startsWith('.'))
+    const dirs = entries.filter(
+      (e) => e.isDirectory() && !e.name.startsWith('.') && (folder || !RESERVED_DIRS.includes(e.name))
+    )
     ;[node.sheets, node.folders] = await Promise.all([
       Promise.all(
         files.map(async (e) => {
           const file = path.join(dir, e.name)
           const [content, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
-          return toSummary(join(folder, e.name.slice(0, -3)), content, stat.mtimeMs, format)
+          const name = e.name.endsWith('.md') ? e.name.slice(0, -3) : e.name
+          return toSummary(join(folder, name), content, stat.mtimeMs, format)
         })
       ),
       Promise.all(dirs.map((e) => this.readFolder(projectId, join(folder, e.name), format, found)))
@@ -437,8 +489,8 @@ export class Library {
   private async relocateSheet(projectId: string, sheetId: string, to: SheetPlace): Promise<string> {
     const from = locate(sheetId)
     if (samePlace(from, to)) return sheetId
-    let target = sheetIdIn(to, from.name)
-    while (await exists(this.sheetPath(projectId, target))) target = newSheetId(to)
+    if (isCanvasId(sheetId) && to.section !== 'notes') throw new Error('Canvases live in the notes.')
+    const target = await this.freeSheetId(projectId, to, sheetId)
     await fs.mkdir(this.placeDir(projectId, to), { recursive: true })
     await fs.rename(this.sheetPath(projectId, sheetId), this.sheetPath(projectId, target))
     return target
@@ -478,7 +530,7 @@ export class Library {
     const taken = items.flatMap((i) =>
       i.kind === 'subsection' && samePlace(parentOf(i), parent) ? [lastSegment(i.subsection).toLowerCase()] : []
     )
-    if (parent.section === 'content' && !parent.subsection) taken.push(NOTES_DIR.toLowerCase())
+    if (parent.section === 'content' && !parent.subsection) taken.push(...RESERVED_DIRS.map((d) => d.toLowerCase()))
     let candidate = base
     for (let n = 2; candidate.toLowerCase() !== except?.toLowerCase() && taken.includes(candidate.toLowerCase()); n++) {
       candidate = `${base} ${n}`
@@ -505,6 +557,10 @@ export class Library {
         renamed = { [item.id]: key }
         keys = keys.map((k) => (k === item.id ? key : k))
       } else {
+        const prefix = `${folderOf(item)}/`
+        if (parent.section !== 'notes' && keys.some((k) => k.startsWith(prefix) && isCanvasId(k))) {
+          throw new Error('Canvases live in the notes.')
+        }
         const name = await this.uniqueSubsection(projectId, parent, lastSegment(item.subsection))
         const to = { section: parent.section, subsection: join(parent.subsection, name) }
         ;({ keys, renamed } = await this.relocateFolder(projectId, item, to, keys))
@@ -527,6 +583,7 @@ export class Library {
       keys.splice(at, 0, key)
     }
     await this.writeMeta(projectId, { order: keys })
+    await this.relinkCanvases(projectId, renamed)
     return renamed
   }
 
@@ -570,8 +627,7 @@ export class Library {
   async moveSheet(fromProject: string, sheetId: string, toProject: string): Promise<void> {
     if (fromProject === toProject) return
     const place = locate(sheetId)
-    let target = sheetId
-    while (await exists(this.sheetPath(toProject, target))) target = newSheetId(place)
+    const target = await this.freeSheetId(toProject, place, sheetId)
     await fs.mkdir(this.placeDir(toProject, place), { recursive: true })
     await fs.rename(this.sheetPath(fromProject, sheetId), this.sheetPath(toProject, target))
 
@@ -588,7 +644,8 @@ export class Library {
     const sheets = await this.listSheets(projectId)
     const hits = await Promise.all(
       sheets.map(async (s) => {
-        const text = (await fs.readFile(this.sheetPath(projectId, s.id), 'utf8')).toLocaleLowerCase()
+        const content = await fs.readFile(this.sheetPath(projectId, s.id), 'utf8')
+        const text = searchableText(s.id, content).toLocaleLowerCase()
         return terms.every((t) => text.includes(t)) ? s.id : null
       })
     )
@@ -618,6 +675,7 @@ export class Library {
     const to = { section: place.section, subsection: join(parent.subsection, next) }
     const { keys, renamed } = await this.relocateFolder(projectId, place, to, (await this.scan(projectId)).keys)
     await this.writeMeta(projectId, { order: keys })
+    await this.relinkCanvases(projectId, renamed)
     return renamed
   }
 
@@ -629,6 +687,74 @@ export class Library {
     const prefix = `${folderOf(place)}/`
     const meta = await this.readMeta(projectId)
     await this.writeMeta(projectId, { order: meta.order.filter((key) => !key.startsWith(prefix)) })
+  }
+
+  // ── Canvases ──────────────────────────────────────────────────────────────
+
+  /** Creates a canvas after `afterId`, or at the end of `place`, which must be in the notes. */
+  async createCanvas(
+    projectId: string,
+    place: SheetPlace,
+    name = 'Untitled Canvas',
+    content = EMPTY_CANVAS,
+    afterId?: string
+  ): Promise<Sheet> {
+    if (place.section !== 'notes') throw new Error('Canvases live in the notes.')
+    const id = await this.freeSheetId(projectId, place, sheetIdIn(place, `${sanitizeName(name, 'Untitled Canvas')}${CANVAS_EXT}`))
+    await fs.mkdir(this.placeDir(projectId, place), { recursive: true })
+    await writeAtomic(this.sheetPath(projectId, id), content)
+    const keys = (await this.scan(projectId)).keys.filter((k) => k !== id)
+    const at = afterId ? keys.indexOf(afterId) : -1
+    const order = at === -1 ? [...keys, id] : [...keys.slice(0, at + 1), id, ...keys.slice(at + 1)]
+    await this.writeMeta(projectId, { order })
+    return this.readSheet(projectId, id)
+  }
+
+  /** A canvas is named by its file, so renaming changes its id. Returns the ids that changed, old to new. */
+  async renameCanvas(projectId: string, sheetId: string, name: string): Promise<Record<string, string>> {
+    if (!isCanvasId(sheetId)) throw new Error('Not a canvas.')
+    const place = locate(sheetId)
+    const wanted = sheetIdIn(place, `${sanitizeName(name, 'Untitled Canvas')}${CANVAS_EXT}`)
+    if (wanted === sheetId) return {}
+    // Renaming only the case of a name mustn't count the canvas as clashing with itself.
+    const target =
+      wanted.toLowerCase() === sheetId.toLowerCase() ? wanted : await this.freeSheetId(projectId, place, wanted)
+    await fs.rename(this.sheetPath(projectId, sheetId), this.sheetPath(projectId, target))
+    const meta = await this.readMeta(projectId)
+    await this.writeMeta(projectId, { order: meta.order.map((k) => (k === sheetId ? target : k)) })
+    const renamed = { [sheetId]: target }
+    await this.relinkCanvases(projectId, renamed)
+    return renamed
+  }
+
+  /** Keep the project's canvases pointing at sheets that moved. */
+  private async relinkCanvases(projectId: string, renamed: Record<string, string>): Promise<void> {
+    if (!Object.keys(renamed).length) return
+    const canvases = (await this.listSheets(projectId)).filter((s) => isCanvasId(s.id))
+    await Promise.all(
+      canvases.map(async ({ id }) => {
+        const file = this.sheetPath(projectId, id)
+        try {
+          const relinked = relinkCanvas(parseCanvas(await fs.readFile(file, 'utf8')), renamed)
+          if (relinked) await writeAtomic(file, serializeCanvas(relinked))
+        } catch {
+          // A canvas that can't be read (mid-merge, say) is left as it is.
+        }
+      })
+    )
+  }
+
+  /** Copy an image into the project's attachments. Returns its path within the project. */
+  async saveAttachment(projectId: string, name: string, data: Uint8Array): Promise<string> {
+    const dir = path.join(this.projectDir(projectId), ATTACHMENTS_DIR)
+    await fs.mkdir(dir, { recursive: true })
+    const clean = sanitizeName(name, 'Image')
+    const dot = clean.lastIndexOf('.')
+    const [base, ext] = dot > 0 ? [clean.slice(0, dot), clean.slice(dot)] : [clean, '']
+    let file = clean
+    for (let n = 2; await exists(path.join(dir, file)); n++) file = `${base} ${n}${ext}`
+    await fs.writeFile(path.join(dir, file), data)
+    return `${ATTACHMENTS_DIR}/${file}`
   }
 
   /**

@@ -1,4 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="assets/hermit-crab.png" width="64" height="64" alt="Orange hermit crab with a blue shell">
 
 # Hermit Crab
 
@@ -8,8 +8,9 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 
 - **Projects and sheets.** The library sidebar holds your projects, which you can group into folders nested as deep as you like. The middle column lists the sheets in the selected project. A sheet's first line becomes its title, and the text after it becomes the excerpt.
 - **Content and notes.** Each project has two sections. The content is the work itself: it's what gets exported and counted. Notes are for planning, outlines and research. Switch between the sections at the top of the sheet list; each remembers the sheet you last had open.
+- **Canvases.** Notes can also be canvases: open boards, like Obsidian's, for planning visually. Add Markdown cards (double-click anywhere), headings, linked notes and sheets that show their text, and images (from the toolbar, by dropping files, or by pasting). Drag from the dot on a card's edge to connect it to another, or onto empty space to start a new connected card. Colour cards and connections, label connections, and pan (drag or scroll) and zoom (⌘-scroll or pinch). Drag notes in from the sheet list to link them. Canvases are saved in the open [JSON Canvas](https://jsoncanvas.org) format, so other apps can read them too.
 - **Subsections.** Either section can be organised into subsections, such as parts and chapters, or characters and research. Subsections nest as deep as you like, and sit in order among the sheets around them.
-- **Plain files on disk.** A library is just a folder (default `~/Documents/Hermit Crab`). Each project is a sub-folder and each sheet is a `.md` file. A folder of projects is a sub-folder marked by a hidden `.hermit-folder` file. Notes go in the project's `Notes` sub-folder, and each subsection is a folder. Sheet and subsection order is kept in a small hidden `.hermit.json`. Markdown files and folders you add to a project folder show up as sheets and subsections.
+- **Plain files on disk.** A library is just a folder (default `~/Documents/Hermit Crab`). Each project is a sub-folder and each sheet is a `.md` file. A folder of projects is a sub-folder marked by a hidden `.hermit-folder` file. Notes go in the project's `Notes` sub-folder, and each subsection is a folder. A canvas is a `.canvas` file named after the canvas. Its links point at files by their path within the project, and images placed on a canvas are copied into the project's `Attachments` folder. Sheet and subsection order is kept in a small hidden `.hermit.json`. Markdown files and folders you add to a project folder show up as sheets and subsections.
 - **Screenplays.** In a project's settings (the sliders button above the sheet list, the project's right-click menu, or **File → Project Settings…**), set the content type to Screenplay to write the content in [Fountain](https://fountain.io), the plain-text format for scripts. Scene headings, characters, dialogue and transitions are laid out as you type, preview as a formatted screenplay, and export as Fountain, or as HTML or PDF in standard screenplay layout. Notes stay Markdown. Project settings are kept in the project's `.hermit.json`, so they sync with it.
 - **Markdown editor.** Syntax stays visible but fades into the background. Headings, emphasis, links, quotes and code are styled inline, and fenced code blocks get syntax highlighting.
 - **Autosave.** Edits are written atomically shortly after you stop typing, and flushed before the window closes or the app quits.
@@ -26,7 +27,7 @@ A quiet, Markdown-based writing app for the desktop, in the spirit of Ulysses. B
 
 | Action | macOS |
 | --- | --- |
-| New sheet / project | ⌘N / ⇧⌘N |
+| New sheet / canvas / project | ⌘N / ⌥⌘N / ⇧⌘N |
 | Bold / italic / code / link | ⌘B / ⌘I / ⌘E / ⌘K |
 | Cycle heading / toggle quote | ⌥⌘H / ⌥⌘' |
 | Find in sheet | ⌘F |

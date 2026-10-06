@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { isCanvasId } from '../../../shared/canvas'
 import type { OutlineItem, OutlineTarget, Section, SheetPlace, SheetSummary } from '../../../shared/types'
 import { formatCount, formatDate } from '../format'
 import { depthOf, isWithin, parentSubsection, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
-import { ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
+import { CanvasIcon, ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
 import { blankContextMenu, RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
 
 const SUBSECTION_DRAG_TYPE = 'application/x-hermit-subsection'
@@ -24,15 +25,21 @@ interface Props {
   query: string
   /** Path of the subsection being renamed in this section. */
   renamingSubsection: string | null
+  /** The canvas being renamed; canvases are named by their file, not their first line. */
+  renamingSheet: string | null
   onQueryChange(query: string): void
   onSectionChange(section: Section): void
   onSelect(id: string): void
   onCreate(place?: SheetPlace): void
   /** The new-item menu, shown below the header's add button. */
   onNewMenu(at: { x: number; y: number }): void
+  onCreateCanvas(): void
   onStartRenameSubsection(subsection: string): void
   onRenameSubsection(place: SheetPlace, name: string): void
   onRenameSubsectionEnd(): void
+  onStartRenameSheet(id: string): void
+  onRenameSheet(id: string, name: string): void
+  onRenameSheetEnd(): void
   onSubsectionMenu(place: SheetPlace): void
   /** Right-click on a section's tab or the list's blank space. */
   onSectionMenu(section: Section): void
@@ -89,6 +96,11 @@ export function SheetListPane(props: Props) {
   const collapsed = useCollapsed(projectId, section)
   const canReorder = !query
   const item = SECTION_NAMES[section].item
+  /** Canvases only belong in the notes, so neither they nor subsections holding them can go to the content. */
+  const holdsCanvas = (dragged: OutlineItem) =>
+    dragged.kind === 'sheet'
+      ? isCanvasId(dragged.id)
+      : items.some((i) => i.kind === 'sheet' && isCanvasId(i.id) && isWithin(i.subsection, dragged.subsection))
   const visible = new Map(sheets.map((s) => [s.id, s]))
 
   // Never hide the open sheet, or a subsection being named, inside a collapsed one.
@@ -160,28 +172,44 @@ export function SheetListPane(props: Props) {
   const dropClass = (key: string) =>
     dropAt?.row === key ? (dropAt.where === 'into' ? 'drop-target' : `drop-${dropAt.where}`) : null
 
-  const renderSheet = (row: OutlineItem & { kind: 'sheet' }, sheet: SheetSummary) => (
-    <li
-      key={sheet.id}
-      className={['sheet-item', sheet.id === activeId && 'active', dropClass(rowKey(row))].filter(Boolean).join(' ')}
-      style={{ marginLeft: depthOf(sheet.subsection) * INDENT }}
-      draggable
-      onClick={() => props.onSelect(sheet.id)}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        props.onContextMenu(sheet.id)
-      }}
-      onDragStart={(e) => startDrag(e, row)}
-      onDragEnd={endDrag}
-      {...dragHandlers(row)}
-    >
-      <div className={`sheet-title${sheet.title ? '' : ' untitled'}`}>{sheet.title || 'Untitled'}</div>
-      {sheet.excerpt && <div className="sheet-excerpt">{sheet.excerpt}</div>}
-      <div className="sheet-meta">
-        {formatDate(sheet.updatedAt)} · {formatCount(sheet.wordCount, 'word')}
-      </div>
-    </li>
-  )
+  const renderSheet = (row: OutlineItem & { kind: 'sheet' }, sheet: SheetSummary) => {
+    const canvas = isCanvasId(sheet.id)
+    const renaming = sheet.id === props.renamingSheet
+    return (
+      <li
+        key={sheet.id}
+        className={['sheet-item', sheet.id === activeId && 'active', dropClass(rowKey(row))].filter(Boolean).join(' ')}
+        style={{ marginLeft: depthOf(sheet.subsection) * INDENT }}
+        draggable={!renaming}
+        onClick={() => props.onSelect(sheet.id)}
+        onDoubleClick={() => canvas && props.onStartRenameSheet(sheet.id)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          props.onContextMenu(sheet.id)
+        }}
+        onDragStart={(e) => startDrag(e, row)}
+        onDragEnd={endDrag}
+        {...dragHandlers(row)}
+      >
+        <div className={`sheet-title${sheet.title ? '' : ' untitled'}`}>
+          {canvas && <CanvasIcon className="sheet-kind" />}
+          {renaming ? (
+            <RenameField
+              initial={sheet.title}
+              onCommit={(name) => props.onRenameSheet(sheet.id, name)}
+              onCancel={props.onRenameSheetEnd}
+            />
+          ) : (
+            sheet.title || 'Untitled'
+          )}
+        </div>
+        {sheet.excerpt && <div className="sheet-excerpt">{sheet.excerpt}</div>}
+        <div className="sheet-meta">
+          {formatDate(sheet.updatedAt)} · {formatCount(sheet.wordCount, 'word')}
+        </div>
+      </li>
+    )
+  }
 
   const renderSubsection = (row: OutlineItem & { kind: 'subsection' }, empty: boolean): ReactNode[] => {
     const path = row.subsection
@@ -314,7 +342,7 @@ export function SheetListPane(props: Props) {
               title={`${SECTION_NAMES[s].label} (⌘3)`}
               // Drop a sheet or subsection on the other section's tab to move it there.
               onDragOver={(e) => {
-                if (s === section || !dragging.current) return
+                if (s === section || !dragging.current || (s === 'content' && holdsCanvas(dragging.current))) return
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'move'
                 setTabDrop(s)
@@ -378,6 +406,11 @@ export function SheetListPane(props: Props) {
               <button className="ghost-button" onClick={() => props.onCreate()}>
                 <ComposeIcon /> New {item}
               </button>
+              {section === 'notes' && (
+                <button className="ghost-button" onClick={props.onCreateCanvas}>
+                  <CanvasIcon /> New Canvas
+                </button>
+              )}
             </>
           )}
         </div>

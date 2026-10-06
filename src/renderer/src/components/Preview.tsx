@@ -4,10 +4,12 @@ import { useMemo } from 'react'
 import { fountainToHtml } from '../../../shared/fountain'
 import type { ContentFormat } from '../../../shared/types'
 
+export const renderMarkdown = (markdown: string) =>
+  DOMPurify.sanitize(marked.parse(markdown, { async: false, gfm: true }))
+
 export function Preview({ text, format }: { text: string; format: ContentFormat }) {
   const html = useMemo(
-    () =>
-      DOMPurify.sanitize(format === 'fountain' ? fountainToHtml(text) : marked.parse(text, { async: false, gfm: true })),
+    () => (format === 'fountain' ? DOMPurify.sanitize(fountainToHtml(text)) : renderMarkdown(text)),
     [text, format]
   )
   return (

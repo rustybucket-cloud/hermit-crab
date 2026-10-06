@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { sheetFile } from '../../shared/canvas'
 import type { SyncState } from '../../shared/types'
 
 const hermit = window.hermit
@@ -19,7 +20,7 @@ export function useSyncState(): SyncState | null {
 }
 
 export function sheetPath(projectId: string, sheetId: string): string {
-  return `${projectId}/${sheetId}.md`
+  return `${projectId}/${sheetFile(sheetId)}`
 }
 
 export function timeAgo(ts: number): string {

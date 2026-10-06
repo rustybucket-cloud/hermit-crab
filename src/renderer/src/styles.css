@@ -27,6 +27,13 @@
   --syn-def: #0e7490;
   --conflict-ours: color-mix(in srgb, var(--accent) 13%, transparent);
   --conflict-theirs: color-mix(in srgb, #d97706 15%, transparent);
+  --canvas-dot: rgba(0, 0, 0, 0.13);
+  --canvas-1: #dc4a4a;
+  --canvas-2: #e07b2e;
+  --canvas-3: #cfa112;
+  --canvas-4: #3a9a55;
+  --canvas-5: #1b98b0;
+  --canvas-6: #8459e0;
 
   color-scheme: light dark;
 }
@@ -53,6 +60,13 @@
     --syn-keyword: #c792ea;
     --syn-number: #f0a35e;
     --syn-def: #5fd1e8;
+    --canvas-dot: rgba(255, 255, 255, 0.09);
+    --canvas-1: #f06c6c;
+    --canvas-2: #f29a55;
+    --canvas-3: #e5c03f;
+    --canvas-4: #5cc27a;
+    --canvas-5: #3cc3dc;
+    --canvas-6: #a487f5;
   }
 }
 
@@ -557,6 +571,22 @@ button {
   opacity: 0.8;
 }
 
+.sheet-kind {
+  width: 13px;
+  height: 13px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  color: var(--text-muted);
+}
+
+.sheet-item.active .sheet-kind {
+  color: inherit;
+}
+
+.sheet-title .rename-field {
+  width: calc(100% - 20px);
+}
+
 .sheets .empty-hint {
   position: absolute;
   top: 170px;
@@ -889,6 +919,558 @@ button {
 
 .screenplay .title-page-extra p {
   margin-top: 0;
+}
+
+/* ── Canvas ─────────────────────────────────────────────────────────────── */
+
+.canvas-view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  outline: none;
+  background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1.5px);
+  touch-action: none;
+}
+
+.canvas-view a,
+.canvas-view img {
+  -webkit-user-drag: none;
+}
+
+.canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.canvas-edges {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-edge-line {
+  fill: none;
+  stroke: var(--card, var(--text-muted));
+  stroke-width: 2;
+}
+
+.canvas-edge-arrow {
+  fill: var(--card, var(--text-muted));
+}
+
+.canvas-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+}
+
+.canvas-edge.selected .canvas-edge-line {
+  stroke: var(--card, var(--accent));
+  stroke-width: 3;
+}
+
+.canvas-edge.selected .canvas-edge-arrow {
+  fill: var(--card, var(--accent));
+}
+
+.canvas-edge.drawing .canvas-edge-line {
+  stroke: var(--accent);
+  stroke-dasharray: 6 5;
+}
+
+.canvas-edge.drawing .canvas-edge-arrow {
+  fill: var(--accent);
+}
+
+.canvas-edge-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-editor);
+  color: var(--text-soft);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.canvas-edge-label.selected {
+  border-color: var(--accent);
+}
+
+.canvas-edge-label.editing {
+  width: 180px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+  user-select: text;
+}
+
+.canvas-node {
+  position: absolute;
+  border: 1.5px solid var(--card, var(--border-strong));
+  border-radius: 10px;
+  background: var(--bg-editor);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 14px rgba(0, 0, 0, 0.05);
+}
+
+.canvas-node.colored {
+  background: color-mix(in srgb, var(--card) 9%, var(--bg-editor));
+}
+
+.canvas-node.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.canvas-node.link-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+}
+
+.canvas-node-body {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.canvas-node-label {
+  position: absolute;
+  bottom: 100%;
+  left: 2px;
+  max-width: 100%;
+  margin-bottom: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.canvas-markdown {
+  height: 100%;
+  padding: 12px 16px;
+  overflow: hidden;
+  font-family: var(--editor-font);
+  font-size: 15px;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+
+.canvas-node.selected .canvas-scroll {
+  overflow-y: auto;
+  user-select: text;
+}
+
+.canvas-markdown > :first-child {
+  margin-top: 0;
+}
+
+.canvas-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.canvas-markdown p,
+.canvas-markdown ul,
+.canvas-markdown ol {
+  margin: 0.5em 0;
+}
+
+.canvas-markdown ul,
+.canvas-markdown ol {
+  padding-left: 1.3em;
+}
+
+.canvas-markdown h1,
+.canvas-markdown h2,
+.canvas-markdown h3,
+.canvas-markdown h4,
+.canvas-markdown h5,
+.canvas-markdown h6 {
+  margin: 0.7em 0 0.3em;
+  line-height: 1.25;
+}
+
+.canvas-markdown h1 {
+  font-size: 1.6em;
+}
+
+.canvas-markdown h2 {
+  font-size: 1.35em;
+}
+
+.canvas-markdown h3 {
+  font-size: 1.15em;
+}
+
+.canvas-markdown a {
+  color: var(--accent);
+}
+
+.canvas-markdown blockquote {
+  margin: 0.6em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-soft);
+}
+
+.canvas-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-hover);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+
+.canvas-markdown pre {
+  padding: 0.7em;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.canvas-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.canvas-markdown img {
+  max-width: 100%;
+}
+
+.canvas-node.type-file .canvas-markdown {
+  font-size: 13.5px;
+}
+
+/* A card that's only a heading reads as a heading on the board, not as a card. */
+.canvas-node.heading,
+.canvas-node.heading.colored {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas-node.heading:hover {
+  border-color: var(--border);
+}
+
+.canvas-node.heading .canvas-markdown {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  font-family: var(--font-ui);
+}
+
+.canvas-node.heading.colored .canvas-markdown {
+  color: var(--card);
+}
+
+.canvas-node.heading h1 {
+  font-size: 34px;
+}
+
+.canvas-node.heading h2 {
+  font-size: 27px;
+}
+
+.canvas-node.heading h3 {
+  font-size: 22px;
+}
+
+.canvas-node.heading :is(h4, h5, h6) {
+  font-size: 18px;
+}
+
+.canvas-node.heading :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-text-editor {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 12px 16px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--editor-font);
+  font-size: 15px;
+  line-height: 1.55;
+  user-select: text;
+}
+
+.canvas-node.image,
+.canvas-node.image.colored {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas-image {
+  display: block;
+  border-radius: 8px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.canvas-missing,
+.canvas-note-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.canvas-note-summary strong {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.canvas-link {
+  display: block;
+  padding: 12px 16px;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.canvas-node.type-group,
+.canvas-node.type-group.colored {
+  background: color-mix(in srgb, var(--card, var(--text-muted)) 6%, transparent);
+  box-shadow: none;
+}
+
+.canvas-node.type-group > .canvas-node-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--card, var(--text-soft));
+}
+
+/* Drag from the dot on any side of a card to connect it. They keep their size at any zoom. */
+.canvas-handle {
+  position: absolute;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg-editor);
+  opacity: 0;
+  transform: scale(calc(1 / var(--zoom)));
+  transition: opacity 100ms ease;
+  cursor: crosshair;
+}
+
+.canvas-handle.top {
+  top: 0;
+  left: 50%;
+}
+
+.canvas-handle.right {
+  top: 50%;
+  left: 100%;
+}
+
+.canvas-handle.bottom {
+  top: 100%;
+  left: 50%;
+}
+
+.canvas-handle.left {
+  top: 50%;
+  left: 0;
+}
+
+.canvas-node:hover > .canvas-handle,
+.canvas-node.selected > .canvas-handle {
+  opacity: 1;
+}
+
+.canvas-resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  border-right: 2.5px solid var(--accent);
+  border-bottom: 2.5px solid var(--accent);
+  border-bottom-right-radius: 5px;
+  transform: scale(calc(1 / var(--zoom)));
+  transform-origin: 100% 100%;
+  cursor: nwse-resize;
+}
+
+.canvas-marquee {
+  position: absolute;
+  border: calc(1px / var(--zoom)) solid var(--accent);
+  background: var(--selection);
+  pointer-events: none;
+}
+
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.canvas-empty p {
+  margin: 0;
+}
+
+.canvas-hint {
+  font-size: 12px;
+}
+
+.canvas-floating,
+.canvas-toolbar {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-sheets);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.canvas-floating {
+  transform: translate(-50%, calc(-100% - 30px));
+}
+
+.canvas-toolbar {
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.canvas-floating-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border-strong);
+}
+
+.canvas-swatch {
+  width: 18px;
+  height: 18px;
+  margin: 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--card);
+}
+
+.canvas-swatch.none {
+  background:
+    linear-gradient(135deg, transparent 45%, var(--text-muted) 45%, var(--text-muted) 55%, transparent 55%),
+    var(--bg-editor);
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+}
+
+.canvas-swatch.current {
+  box-shadow:
+    0 0 0 2px var(--bg-sheets),
+    0 0 0 3.5px var(--text-soft);
+}
+
+.canvas-zoom {
+  min-width: 46px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-zoom:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.canvas-picker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: 360px;
+  padding: 8px 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-sheets);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  transform: translateX(-50%);
+}
+
+.canvas-picker .search-field {
+  flex: none;
+  margin: 0 8px 6px;
+}
+
+.canvas-picker-list {
+  margin: 0;
+  padding: 0 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.canvas-picker-list li {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.canvas-picker-list li.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.canvas-picker-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.canvas-picker-place {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.canvas-picker-list .canvas-picker-empty {
+  color: var(--text-muted);
 }
 
 /* ── Settings ───────────────────────────────────────────────────────────── */

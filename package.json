@@ -52,7 +52,14 @@
     "files": [
       "out/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "assets/hermit-crab.png",
+        "to": "hermit-crab.png"
+      }
+    ],
     "mac": {
+      "icon": "assets/hermit-crab.icns",
       "category": "public.app-category.productivity",
       "target": [
         "dmg",
@@ -60,11 +67,13 @@
       ]
     },
     "win": {
+      "icon": "assets/hermit-crab.ico",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "icon": "assets/hermit-crab.png",
       "target": [
         "AppImage"
       ],

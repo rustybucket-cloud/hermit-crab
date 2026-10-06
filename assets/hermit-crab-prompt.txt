@@ -1,0 +1,12 @@
+Generated with the built-in image_gen tool.
+Source: hermit-crab.png (opaque PNG with sandy background)
+Alternate version: hermit-crab-transparent.png (original icon with no background)
+Platform exports: hermit-crab.icns (macOS), hermit-crab.ico (Windows)
+
+Use case: precise-object-edit
+Asset type: square desktop app icon for Hermit Crab.
+Input image: edit target, the approved original orange and blue hermit crab.
+Primary request: add only a subtle warm sandy background color behind the exact existing crab and shell.
+Locked foreground: preserve the original crab and blue shell faithfully, including every shape, pose, eye, claw, leg, spiral, color, scale and position. No foreground redesign.
+Background: the ENTIRE square canvas, edge to edge, must be completely opaque, clean, smooth, uniform pale warm sand color #F3E6D0. Replace every transparent pixel with this solid background, including transparent gaps in the spiral and between limbs. A quiet beige color alone should imply sand.
+Constraints: one fully opaque square image. No rounded tile, no transparent corners, no alpha cutout, no white border, no white flecks, no fringe, no jagged edges, no texture, no literal sand grains, no scenery, no horizon, no gradients in the background, no shadow, no added objects or text. Keep the composition and the source foreground unchanged.
