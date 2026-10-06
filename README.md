@@ -1,4 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="assets/hermit-crab.png" width="64" height="64" alt="Orange hermit crab with a blue shell">
 
 # Hermit Crab
 

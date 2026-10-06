@@ -24,6 +24,9 @@ interface Settings {
 }
 
 const isMac = process.platform === 'darwin'
+const appIcon = app.isPackaged
+  ? path.join(process.resourcesPath, 'hermit-crab.png')
+  : path.join(app.getAppPath(), 'assets/hermit-crab.png')
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
 
 let settings: Settings = {}
@@ -134,6 +137,7 @@ function createWindow(): void {
     minHeight: 420,
     show: false,
     title: 'Hermit Crab',
+    icon: appIcon,
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 18, y: 18 },
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1d1f' : '#fbfaf8',
@@ -516,6 +520,7 @@ function registerIpc(): void {
 app.setName('Hermit Crab')
 
 app.whenReady().then(async () => {
+  if (isMac) app.dock?.setIcon(appIcon)
   await loadSettings()
   await openLibrary(
     process.env['HERMIT_LIBRARY'] ?? settings.libraryPath ?? path.join(app.getPath('documents'), 'Hermit Crab')
