@@ -23,6 +23,8 @@ interface Prefs {
   showSheets: boolean
   preview: boolean
   focus: boolean
+  // Side panes as they were when focus mode began, restored on exit.
+  panesBeforeFocus: { showLibrary: boolean; showSheets: boolean } | null
   typewriter: boolean
   font: EditorFont
   fontSize: number
@@ -33,6 +35,7 @@ const DEFAULT_PREFS: Prefs = {
   showSheets: true,
   preview: false,
   focus: false,
+  panesBeforeFocus: null,
   typewriter: false,
   font: 'sans',
   fontSize: 17
@@ -403,7 +406,7 @@ export default function App() {
     else if (choice?.startsWith('move:')) void moveSheet(id, projectId, choice.slice(5))
   }
 
-  const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'focus' | 'typewriter') =>
+  const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'typewriter') =>
     setPrefs((p) => ({ ...p, [key]: !p[key] }))
 
   // Hide both side panes if either is showing; otherwise bring both back.
@@ -412,6 +415,20 @@ export default function App() {
       const show = !p.showLibrary && !p.showSheets
       return { ...p, showLibrary: show, showSheets: show }
     })
+
+  // Entering focus mode clears the side panes away; leaving it brings back whatever was open before.
+  const toggleFocus = () =>
+    setPrefs((p) =>
+      p.focus
+        ? { ...p, ...p.panesBeforeFocus, focus: false, panesBeforeFocus: null }
+        : {
+            ...p,
+            focus: true,
+            panesBeforeFocus: { showLibrary: p.showLibrary, showSheets: p.showSheets },
+            showLibrary: false,
+            showSheets: false
+          }
+    )
 
   // ── Menu + lifecycle wiring ───────────────────────────────────────────────
 
@@ -453,7 +470,7 @@ export default function App() {
       case 'toggle-sheets': return togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
       case 'toggle-preview': return current && togglePref('preview')
-      case 'toggle-focus': return togglePref('focus')
+      case 'toggle-focus': return toggleFocus()
       case 'toggle-typewriter': return togglePref('typewriter')
       case 'font-sans': return setPrefs((p) => ({ ...p, font: 'sans' }))
       case 'font-serif': return setPrefs((p) => ({ ...p, font: 'serif' }))
@@ -539,31 +556,29 @@ export default function App() {
         <header className="pane-header editor-toolbar" onMouseDown={(e) => e.preventDefault()}>
           <div className="pane-toggles" role="group" aria-label="Navigation panes">
             <button
-              className="pane-toggle"
+              className={`icon-button${prefs.showLibrary ? ' on' : ''}`}
               onClick={() => togglePref('showLibrary')}
               aria-label={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar`}
               aria-pressed={prefs.showLibrary}
               title={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar (${shortcutModifier}1)`}
             >
               <SidebarIcon />
-              <span>Projects</span>
             </button>
             <button
-              className="pane-toggle"
+              className={`icon-button${prefs.showSheets ? ' on' : ''}`}
               onClick={() => togglePref('showSheets')}
               aria-label={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list`}
               aria-pressed={prefs.showSheets}
               title={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list (${shortcutModifier}2)`}
             >
               <SheetsIcon />
-              <span>Sheets</span>
             </button>
           </div>
           <div className="toolbar-spacer" />
           <div className="toolbar-modes">
             <button
               className={`icon-button${prefs.focus ? ' on' : ''}`}
-              onClick={() => togglePref('focus')}
+              onClick={toggleFocus}
               title="Focus Mode (⇧⌘F)"
             >
               <FocusIcon />
