@@ -8,6 +8,8 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
-    plugins: [react()]
+    plugins: [react()],
+    // Pre-bundling moves Harper's code away from its .wasm file, which it finds by relative URL.
+    optimizeDeps: { exclude: ['harper.js'] }
   }
 })

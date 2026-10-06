@@ -15,13 +15,15 @@ import {
 import type { SyncState } from '../../../shared/types'
 import { CloseIcon, PlusIcon } from './Icons'
 import { SyncSettings } from './SyncSettings'
+import { WritingSettings, type GrammarPrefs } from './WritingSettings'
 
 const hermit = window.hermit
 
-export type SettingsTab = 'appearance' | 'sync'
+export type SettingsTab = 'appearance' | 'writing' | 'sync'
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
+  { id: 'writing', label: 'Writing' },
   { id: 'sync', label: 'Sync' }
 ]
 
@@ -30,12 +32,24 @@ interface Props {
   onTabChange(tab: SettingsTab): void
   theme: ThemeSettings
   onChange(theme: ThemeSettings): void
+  grammar: GrammarPrefs
+  onGrammarChange(patch: Partial<GrammarPrefs>): void
   sync: SyncState | null
   onOpenMerge(): void
   onClose(): void
 }
 
-export function SettingsOverlay({ tab, onTabChange, theme, onChange, sync, onOpenMerge, onClose }: Props) {
+export function SettingsOverlay({
+  tab,
+  onTabChange,
+  theme,
+  onChange,
+  grammar,
+  onGrammarChange,
+  sync,
+  onOpenMerge,
+  onClose
+}: Props) {
   const systemDark = useSystemDark()
   const colors = resolveColors(theme, systemDark)
   const [editing, setEditing] = useState<ColorSlot | null>(null)
@@ -102,6 +116,8 @@ export function SettingsOverlay({ tab, onTabChange, theme, onChange, sync, onOpe
         <div className="settings-body">
           {tab === 'sync' ? (
             <SyncSettings sync={sync} onOpenMerge={onOpenMerge} />
+          ) : tab === 'writing' ? (
+            <WritingSettings {...grammar} onChange={onGrammarChange} />
           ) : (
             <>
               <section className="settings-section">

@@ -41,6 +41,7 @@ export type MenuAction =
   | 'toggle-preview'
   | 'toggle-focus'
   | 'toggle-typewriter'
+  | 'toggle-grammar'
   | 'font-sans'
   | 'font-serif'
   | 'font-mono'

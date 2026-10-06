@@ -292,6 +292,7 @@ function buildMenu(): void {
         item('Toggle Preview', 'toggle-preview', 'CmdOrCtrl+Shift+P'),
         item('Focus Mode', 'toggle-focus', 'CmdOrCtrl+Shift+F'),
         item('Typewriter Mode', 'toggle-typewriter', 'CmdOrCtrl+Shift+T'),
+        item('Check Grammar', 'toggle-grammar'),
         { type: 'separator' },
         item('Previous Sheet', 'prev-sheet', 'CmdOrCtrl+Alt+Up'),
         item('Next Sheet', 'next-sheet', 'CmdOrCtrl+Alt+Down'),

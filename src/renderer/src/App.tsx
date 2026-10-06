@@ -10,6 +10,7 @@ import { Preview } from './components/Preview'
 import { SettingsOverlay, type SettingsTab } from './components/SettingsOverlay'
 import { SheetListPane } from './components/SheetListPane'
 import { formatCommands } from './editor/extensions'
+import { defaultDialect, type GrammarDialect } from './editor/grammar'
 import { formatCount } from './format'
 import { sheetPath, syncLabel, timeAgo, useSyncState } from './sync'
 import { useTheme } from './theme'
@@ -26,6 +27,8 @@ interface Prefs {
   // Side panes as they were when focus mode began, restored on exit.
   panesBeforeFocus: { showLibrary: boolean; showSheets: boolean } | null
   typewriter: boolean
+  grammar: boolean
+  dialect: GrammarDialect
   font: EditorFont
   fontSize: number
 }
@@ -37,6 +40,8 @@ const DEFAULT_PREFS: Prefs = {
   focus: false,
   panesBeforeFocus: null,
   typewriter: false,
+  grammar: true,
+  dialect: defaultDialect(),
   font: 'sans',
   fontSize: 17
 }
@@ -406,7 +411,7 @@ export default function App() {
     else if (choice?.startsWith('move:')) void moveSheet(id, projectId, choice.slice(5))
   }
 
-  const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'typewriter') =>
+  const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'typewriter' | 'grammar') =>
     setPrefs((p) => ({ ...p, [key]: !p[key] }))
 
   // Hide both side panes if either is showing; otherwise bring both back.
@@ -472,6 +477,7 @@ export default function App() {
       case 'toggle-preview': return current && togglePref('preview')
       case 'toggle-focus': return toggleFocus()
       case 'toggle-typewriter': return togglePref('typewriter')
+      case 'toggle-grammar': return togglePref('grammar')
       case 'font-sans': return setPrefs((p) => ({ ...p, font: 'sans' }))
       case 'font-serif': return setPrefs((p) => ({ ...p, font: 'serif' }))
       case 'font-mono': return setPrefs((p) => ({ ...p, font: 'mono' }))
@@ -619,6 +625,7 @@ export default function App() {
                 content={current.sheet.content}
                 focus={prefs.focus}
                 typewriter={prefs.typewriter}
+                grammar={prefs.grammar ? prefs.dialect : null}
                 fontKey={`${prefs.font}:${prefs.fontSize}`}
                 hidden={prefs.preview}
                 readOnly={conflicted}
@@ -680,6 +687,8 @@ export default function App() {
           onTabChange={setSettingsTab}
           theme={theme}
           onChange={setTheme}
+          grammar={{ grammar: prefs.grammar, dialect: prefs.dialect }}
+          onGrammarChange={(patch) => setPrefs((p) => ({ ...p, ...patch }))}
           sync={sync}
           onOpenMerge={openMerge}
           onClose={closeSettings}

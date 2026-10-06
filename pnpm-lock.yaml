@@ -178,6 +178,9 @@ importers:
       '@codemirror/language-data':
         specifier: ^6.5.2
         version: 6.5.2
+      '@codemirror/lint':
+        specifier: ^6.9.7
+        version: 6.9.7
       '@codemirror/search':
         specifier: ^6.7.2
         version: 6.7.2
@@ -196,6 +199,9 @@ importers:
       dompurify:
         specifier: ^3.4.16
         version: 3.4.16
+      harper.js:
+        specifier: ^2.10.0
+        version: 2.10.0
       marked:
         specifier: ^18.0.14
         version: 18.0.14
@@ -1457,6 +1463,9 @@ packages:
       picomatch:
         optional: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   filelist@1.0.6:
     resolution: {integrity: sha512-5giy2PkLYY1cP39p17Ech+2xlpTRL9HLspOfEgm0L6CwBXBTgsK5ou0JtzYuepxkaQ/tvhCFIJ5uXo0OrM2DxA==}
 
@@ -1541,6 +1550,9 @@ packages:
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
+
+  harper.js@2.10.0:
+    resolution: {integrity: sha512-s6BDuqtRbX8M/5exH1G5M7VzAuv6l0TagbRxMY37OsrT/1kWFjWmqHydWrkYFqTUW+fFhu4Hj2yUxvChp862Pg==}
 
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
@@ -3613,6 +3625,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.7
 
+  fflate@0.8.3: {}
+
   filelist@1.0.6:
     dependencies:
       minimatch: 5.1.9
@@ -3737,6 +3751,10 @@ snapshots:
       responselike: 2.0.1
 
   graceful-fs@4.2.11: {}
+
+  harper.js@2.10.0:
+    dependencies:
+      fflate: 0.8.3
 
   has-flag@4.0.0: {}
 
