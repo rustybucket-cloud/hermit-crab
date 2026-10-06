@@ -1,5 +1,6 @@
 Generated with the built-in image_gen tool.
 Source: hermit-crab.png (opaque PNG with sandy background)
+Alternate version: hermit-crab-transparent.png (original icon with no background)
 Platform exports: hermit-crab.icns (macOS), hermit-crab.ico (Windows)
 
 Use case: precise-object-edit
