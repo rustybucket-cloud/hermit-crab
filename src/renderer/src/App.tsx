@@ -659,6 +659,32 @@ export default function App() {
     else if (choice === 'delete') void deleteFolder(folder)
   }
 
+  const showLibraryMenu = async () => {
+    const choice = await hermit.showContextMenu([
+      { id: 'new-project', label: 'New Project' },
+      { id: 'new-folder', label: 'New Folder' }
+    ])
+    if (choice === 'new-project') void createProject(null)
+    else if (choice === 'new-folder') void createFolder(null)
+  }
+
+  /** New sheets and subsections at the top level of a section, switching to it first so they show. */
+  const showSectionMenu = async (to: Section) => {
+    const choice = await hermit.showContextMenu([
+      { id: 'new', label: `New ${SECTION_NAMES[to].item}` },
+      ...(to === 'notes' ? [{ id: 'new-canvas', label: 'New Canvas' }] : []),
+      { id: 'new-subsection', label: 'New Subsection' }
+    ])
+    if (!choice) return
+    const place: SheetPlace = { section: to, subsection: null }
+    if (choice === 'new') void createSheet('', place)
+    else if (choice === 'new-canvas') void createCanvas(place)
+    else if (choice === 'new-subsection') {
+      await switchSection(to)
+      void createSubsection(place)
+    }
+  }
+
   const showSubsectionMenu = async (place: SheetPlace) => {
     const choice = await hermit.showContextMenu([
       { id: 'new', label: `New ${SECTION_NAMES[place.section].item}` },
@@ -812,6 +838,7 @@ export default function App() {
           onStartRenameFolder={setRenamingFolder}
           onContextMenu={(id) => void showProjectMenu(id)}
           onFolderMenu={(folder) => void showFolderMenu(folder)}
+          onLibraryMenu={() => void showLibraryMenu()}
           onDropSheet={(sheetId, from, to) => void moveSheet(sheetId, from, to)}
           onMove={(libraryPath, folder) => void moveInLibrary(libraryPath, folder)}
         />
@@ -843,6 +870,7 @@ export default function App() {
           onRenameSheet={(id, name) => void renameCanvas(id, name)}
           onRenameSheetEnd={() => setRenamingSheet(null)}
           onSubsectionMenu={(name) => void showSubsectionMenu(name)}
+          onSectionMenu={(s) => void showSectionMenu(s)}
           onMove={(item, target) => void moveItem(item, target)}
           onContextMenu={(id) => void showSheetMenu(id)}
         />

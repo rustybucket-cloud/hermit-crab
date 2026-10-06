@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
 import type { ProjectSummary } from '../../../shared/types'
 import { ChevronIcon, FolderIcon, FolderPlusIcon, GearIcon, PlusIcon } from './Icons'
 
@@ -25,6 +25,8 @@ interface Props {
   onStartRenameFolder(folder: string): void
   onContextMenu(id: string): void
   onFolderMenu(folder: string): void
+  /** Right-click on the library's blank space. */
+  onLibraryMenu(): void
   onDropSheet(sheetId: string, fromProject: string, toProject: string): void
   /** Move a project or folder into a folder, or to the top of the library with null. */
   onMove(libraryPath: string, folder: string | null): void
@@ -197,6 +199,10 @@ export function LibraryPane(props: Props) {
               key={`empty:${folder}`}
               className="library-empty"
               style={{ marginLeft: (depth + 1) * INDENT }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                props.onFolderMenu(folder)
+              }}
               {...folderDrop(folder)}
             >
               Empty
@@ -213,7 +219,7 @@ export function LibraryPane(props: Props) {
   ]
 
   return (
-    <aside className="pane library">
+    <aside className="pane library" onContextMenu={blankContextMenu(props.onLibraryMenu)}>
       <header className="pane-header" />
       <div className="library-section-label">Projects</div>
       <nav
@@ -239,6 +245,13 @@ export function LibraryPane(props: Props) {
       </footer>
     </aside>
   )
+}
+
+/** Right-clicks on a pane's blank space. Rows show their own menus, and text fields keep the edit menu. */
+export const blankContextMenu = (show: () => void) => (e: MouseEvent) => {
+  if (e.defaultPrevented || (e.target as Element).closest('input, textarea')) return
+  e.preventDefault()
+  show()
 }
 
 export function RenameField({

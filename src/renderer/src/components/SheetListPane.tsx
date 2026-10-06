@@ -4,7 +4,7 @@ import type { OutlineItem, OutlineTarget, Section, SheetPlace, SheetSummary } fr
 import { formatCount, formatDate } from '../format'
 import { depthOf, isWithin, parentSubsection, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
 import { CanvasIcon, ChevronIcon, ComposeIcon, FolderPlusIcon, PlusIcon, SearchIcon } from './Icons'
-import { RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
+import { blankContextMenu, RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
 
 const SUBSECTION_DRAG_TYPE = 'application/x-hermit-subsection'
 const COLLAPSED_KEY = 'hermit:collapsed-subsections'
@@ -40,6 +40,8 @@ interface Props {
   onRenameSheet(id: string, name: string): void
   onRenameSheetEnd(): void
   onSubsectionMenu(place: SheetPlace): void
+  /** Right-click on a section's tab or the list's blank space. */
+  onSectionMenu(section: Section): void
   onMove(item: OutlineItem, target: OutlineTarget): void
   onContextMenu(id: string): void
 }
@@ -261,6 +263,10 @@ export function SheetListPane(props: Props) {
           key={`empty${rowKey(row)}`}
           className={['subsection-empty', dropClass(`empty${rowKey(row)}`)].filter(Boolean).join(' ')}
           style={{ marginLeft: indent + INDENT }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            props.onSubsectionMenu(place)
+          }}
           {...dragHandlers(row, place)}
         >
           Empty
@@ -285,7 +291,10 @@ export function SheetListPane(props: Props) {
   const empty = query ? sheets.length === 0 : items.length === 0
 
   return (
-    <section className="pane sheets">
+    <section
+      className="pane sheets"
+      onContextMenu={projectId ? blankContextMenu(() => props.onSectionMenu(section)) : undefined}
+    >
       <header className="pane-header">
         <div className="pane-title">
           <span className="pane-title-name">{props.projectName}</span>
@@ -313,6 +322,10 @@ export function SheetListPane(props: Props) {
               aria-selected={s === section}
               className={['section-tab', s === section && 'active', s === tabDrop && 'drop-target'].filter(Boolean).join(' ')}
               onClick={() => props.onSectionChange(s)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                props.onSectionMenu(s)
+              }}
               title={`${SECTION_NAMES[s].label} (⌘3)`}
               // Drop a sheet or subsection on the other section's tab to move it there.
               onDragOver={(e) => {
