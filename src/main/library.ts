@@ -3,9 +3,11 @@ import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type {
+  ContentFormat,
   Outline,
   OutlineItem,
   OutlineTarget,
+  ProjectSettings,
   ProjectSummary,
   Sheet,
   SheetPlace,
@@ -27,6 +29,7 @@ import { countWords, summarize } from '../shared/text'
  * The order of sheets and subsections lives in a small hidden `.hermit.json` per
  * project, as one list of sheet ids and folder paths (which end in `/`). Keeping
  * folders in the list also keeps empty subsections, which git drops, across a sync.
+ * The same file holds the project's settings, so they travel with it.
  */
 
 const META_FILE = '.hermit.json'
@@ -34,7 +37,13 @@ const FOLDER_MARKER = '.hermit-folder'
 const NOTES_DIR = 'Notes'
 
 interface ProjectMeta {
+  settings: ProjectSettings
   order: string[]
+}
+
+export function normalizeProjectSettings(raw: unknown): ProjectSettings {
+  const settings = (raw && typeof raw === 'object' ? raw : {}) as Partial<ProjectSettings>
+  return { format: settings.format === 'fountain' ? 'fountain' : 'markdown' }
 }
 
 function assertSafeName(name: string): void {
@@ -121,9 +130,10 @@ async function writeAtomic(file: string, content: string): Promise<void> {
   await fs.rename(tmp, file)
 }
 
-function toSummary(id: string, content: string, updatedAt: number): SheetSummary {
-  const { title, excerpt } = summarize(content)
+/** `format` is the project's; notes are always Markdown. */
+function toSummary(id: string, content: string, updatedAt: number, format: ContentFormat): SheetSummary {
   const { section, subsection } = locate(id)
+  const { title, excerpt } = summarize(content, section === 'content' ? format : 'markdown')
   return { id, section, subsection, title, excerpt, wordCount: countWords(content), updatedAt }
 }
 
@@ -133,8 +143,14 @@ interface Folder {
   folders: Folder[]
 }
 
-/** An outline, plus its order list: every sheet id and folder key, in reading order. */
-type ScannedOutline = Outline & { keys: string[] }
+export interface CompiledDocument {
+  title: string
+  text: string
+  format: ContentFormat
+}
+
+/** An outline, plus its order list (every sheet id and folder key, in reading order) and the project's settings. */
+type ScannedOutline = Outline & { keys: string[]; settings: ProjectSettings }
 
 export class Library {
   constructor(public readonly root: string) {}
@@ -177,14 +193,23 @@ export class Library {
     try {
       const raw = await fs.readFile(path.join(this.projectDir(projectId), META_FILE), 'utf8')
       const meta = JSON.parse(raw) as Partial<ProjectMeta>
-      return { order: Array.isArray(meta.order) ? meta.order.filter((x) => typeof x === 'string') : [] }
+      return {
+        settings: normalizeProjectSettings(meta.settings),
+        order: Array.isArray(meta.order) ? meta.order.filter((x) => typeof x === 'string') : []
+      }
     } catch {
-      return { order: [] }
+      return { settings: normalizeProjectSettings(null), order: [] }
     }
   }
 
-  private async writeMeta(projectId: string, meta: ProjectMeta): Promise<void> {
+  /** Change part of the meta file, keeping the rest as it is. */
+  private async writeMeta(projectId: string, patch: Partial<ProjectMeta>): Promise<void> {
+    const meta = { ...(await this.readMeta(projectId)), ...patch }
     await writeAtomic(path.join(this.projectDir(projectId), META_FILE), JSON.stringify(meta, null, 2))
+  }
+
+  private async formatOf(projectId: string): Promise<ContentFormat> {
+    return (await this.readMeta(projectId)).settings.format
   }
 
   /** A path for `name` inside `folder` that nothing else is using. `except` is the item's own current name. */
@@ -236,7 +261,7 @@ export class Library {
   }
 
   async projectSummary(projectId: string): Promise<ProjectSummary> {
-    const sheets = await this.listSheets(projectId)
+    const { sheets, settings } = await this.scan(projectId)
     const content = sheets.filter((s) => s.section === 'content')
     const stat = await fs.stat(this.projectDir(projectId))
     return {
@@ -245,8 +270,15 @@ export class Library {
       folder: parentPath(projectId),
       sheetCount: content.length,
       wordCount: content.reduce((sum, s) => sum + s.wordCount, 0),
-      updatedAt: Math.max(stat.mtimeMs, ...sheets.map((s) => s.updatedAt))
+      updatedAt: Math.max(stat.mtimeMs, ...sheets.map((s) => s.updatedAt)),
+      settings
     }
+  }
+
+  async updateProjectSettings(projectId: string, patch: Partial<ProjectSettings>): Promise<ProjectSummary> {
+    const { settings } = await this.readMeta(projectId)
+    await this.writeMeta(projectId, { settings: normalizeProjectSettings({ ...settings, ...patch }) })
+    return this.projectSummary(projectId)
   }
 
   async createProject(name: string, folder: string | null = null): Promise<ProjectSummary> {
@@ -302,7 +334,12 @@ export class Library {
   // ── Outline ───────────────────────────────────────────────────────────────
 
   /** Read a folder and every subsection below it. */
-  private async readFolder(projectId: string, folder: string, found: Map<string, Folder>): Promise<Folder> {
+  private async readFolder(
+    projectId: string,
+    folder: string,
+    format: ContentFormat,
+    found: Map<string, Folder>
+  ): Promise<Folder> {
     const node: Folder = { path: folder, sheets: [], folders: [] }
     found.set(folder, node)
     const dir = this.folderDir(projectId, folder)
@@ -318,10 +355,10 @@ export class Library {
         files.map(async (e) => {
           const file = path.join(dir, e.name)
           const [content, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
-          return toSummary(join(folder, e.name.slice(0, -3)), content, stat.mtimeMs)
+          return toSummary(join(folder, e.name.slice(0, -3)), content, stat.mtimeMs, format)
         })
       ),
-      Promise.all(dirs.map((e) => this.readFolder(projectId, join(folder, e.name), found)))
+      Promise.all(dirs.map((e) => this.readFolder(projectId, join(folder, e.name), format, found)))
     ])
     return node
   }
@@ -329,10 +366,11 @@ export class Library {
   /** Both sections, every sheet and subsection, in reading order. */
   private async scan(projectId: string): Promise<ScannedOutline> {
     const found = new Map<string, Folder>()
-    const [content, notes, meta] = await Promise.all([
-      this.readFolder(projectId, '', found),
-      this.readFolder(projectId, NOTES_DIR, found),
-      this.readMeta(projectId)
+    const meta = await this.readMeta(projectId)
+    const { format } = meta.settings
+    const [content, notes] = await Promise.all([
+      this.readFolder(projectId, '', format, found),
+      this.readFolder(projectId, NOTES_DIR, format, found)
     ])
 
     // Subsections listed in the order but missing on disk are empty ones a sync dropped.
@@ -354,7 +392,7 @@ export class Library {
 
     // Ordered items first; anything added outside the app goes last: sheets oldest first, then folders by name.
     const rank = new Map(meta.order.map((key, i) => [key, i]))
-    const outline: ScannedOutline = { sheets: [], items: [], keys: [] }
+    const outline: ScannedOutline = { sheets: [], items: [], keys: [], settings: meta.settings }
     const visit = (folder: Folder) => {
       const children = [
         ...folder.sheets.map((sheet) => ({ key: sheet.id, sheet, folder: undefined })),
@@ -496,13 +534,13 @@ export class Library {
 
   async readSheet(projectId: string, sheetId: string): Promise<Sheet> {
     const file = this.sheetPath(projectId, sheetId)
-    const [content, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
-    return { ...toSummary(sheetId, content, stat.mtimeMs), content }
+    const [content, stat, format] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file), this.formatOf(projectId)])
+    return { ...toSummary(sheetId, content, stat.mtimeMs, format), content }
   }
 
   async writeSheet(projectId: string, sheetId: string, content: string): Promise<SheetSummary> {
     await writeAtomic(this.sheetPath(projectId, sheetId), content)
-    return toSummary(sheetId, content, Date.now())
+    return toSummary(sheetId, content, Date.now(), await this.formatOf(projectId))
   }
 
   /** Creates the sheet after `afterId`, or at the end of `place`. */
@@ -593,12 +631,17 @@ export class Library {
     await this.writeMeta(projectId, { order: meta.order.filter((key) => !key.startsWith(prefix)) })
   }
 
-  /** Glue sheets together in order, the way they'd read as one manuscript. Without ids, that's the project's content. */
-  async compile(projectId: string, sheetIds?: string[]): Promise<{ title: string; markdown: string }> {
-    const ids = sheetIds ?? (await this.listSheets(projectId)).filter((s) => s.section === 'content').map((s) => s.id)
+  /**
+   * Glue sheets together in order, the way they'd read as one manuscript. Without ids, that's the project's content.
+   * A screenplay's content is Fountain; anything with notes in it is Markdown.
+   */
+  async compile(projectId: string, sheetIds?: string[]): Promise<CompiledDocument> {
+    const { sheets, settings } = await this.scan(projectId)
+    const ids = sheetIds ?? sheets.filter((s) => s.section === 'content').map((s) => s.id)
+    const format = ids.every((id) => locate(id).section === 'content') ? settings.format : 'markdown'
     const parts = await Promise.all(ids.map((id) => fs.readFile(this.sheetPath(projectId, id), 'utf8')))
-    const markdown = parts.map((p) => p.trim()).filter(Boolean).join('\n\n') + '\n'
-    const title = sheetIds?.length === 1 ? summarize(parts[0]).title || 'Untitled' : lastSegment(projectId)
-    return { title, markdown }
+    const text = parts.map((p) => p.trim()).filter(Boolean).join('\n\n') + '\n'
+    const title = sheetIds?.length === 1 ? summarize(parts[0], format).title || 'Untitled' : lastSegment(projectId)
+    return { title, text, format }
   }
 }

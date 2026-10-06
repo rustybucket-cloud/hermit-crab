@@ -2,10 +2,13 @@ import type { Text } from '@codemirror/state'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { countWords, readingMinutes } from '../../shared/text'
 import type {
+  ContentFormat,
+  ContextMenuEntry,
   ExportFormat,
   MenuAction,
   OutlineItem,
   OutlineTarget,
+  ProjectSettings as ProjectSettingsPatch,
   ProjectSummary,
   Section,
   Sheet,
@@ -17,9 +20,10 @@ import { EyeIcon, FocusIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon }
 import { LibraryPane } from './components/LibraryPane'
 import { MergeEditor } from './components/MergeEditor'
 import { Preview } from './components/Preview'
+import { ProjectSettings } from './components/ProjectSettings'
 import { SettingsOverlay, type SettingsTab } from './components/SettingsOverlay'
 import { SheetListPane } from './components/SheetListPane'
-import { formatCommands } from './editor/extensions'
+import { formatCommands, type FormatCommand } from './editor/extensions'
 import { defaultDialect, type GrammarDialect } from './editor/grammar'
 import { formatCount } from './format'
 import { isWithin, otherSection, placeName, samePlace, SECTION_NAMES } from './sections'
@@ -109,6 +113,8 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
   const sync = useSyncState()
   const [mergeOpen, setMergeOpen] = useState(false)
+  // The project whose settings are open.
+  const [projectSettingsFor, setProjectSettingsFor] = useState<string | null>(null)
 
   const editor = useRef<EditorHandle>(null)
   const pending = useRef<{ projectId: string; sheetId: string; doc: Text } | null>(null)
@@ -510,6 +516,32 @@ export default function App() {
     await hermit.exportSheets(pid, ids, format)
   }
 
+  /** A screenplay's content exports as Fountain; everything else as Markdown. */
+  const exportItems = (format: ContentFormat): ContextMenuEntry[] => [
+    format === 'fountain'
+      ? { id: 'export-fountain', label: 'Export as Fountain…' }
+      : { id: 'export-md', label: 'Export as Markdown…' },
+    { id: 'export-html', label: 'Export as HTML…' },
+    { id: 'export-pdf', label: 'Export as PDF…' }
+  ]
+
+  const formatOf = (pid: string | null | undefined): ContentFormat =>
+    projects.find((p) => p.id === pid)?.settings.format ?? 'markdown'
+
+  // Notes are always Markdown; content is written in the project's format.
+  const sheetFormat: ContentFormat = current?.sheet.section === 'content' ? formatOf(current.projectId) : 'markdown'
+
+  const updateProjectSettings = async (id: string, patch: Partial<ProjectSettingsPatch>) => {
+    await flush()
+    try {
+      await hermit.updateProjectSettings(id, patch)
+    } catch (err) {
+      console.error('Saving project settings failed', err)
+    }
+    // Sheet titles and excerpts read differently in another format.
+    await Promise.all([refreshProjects(), id === projectId && refreshSheets(id)])
+  }
+
   const stepSheet = (delta: number) => {
     if (!projectId || !visibleSheets.length) return
     const index = visibleSheets.findIndex((s) => s.id === current?.sheet.id)
@@ -521,14 +553,14 @@ export default function App() {
     const choice = await hermit.showContextMenu([
       { id: 'rename', label: 'Rename' },
       { id: 'reveal', label: 'Show in Finder' },
+      { id: 'settings', label: 'Project Settings…' },
       { type: 'separator' },
-      { id: 'export-md', label: 'Export as Markdown…' },
-      { id: 'export-html', label: 'Export as HTML…' },
-      { id: 'export-pdf', label: 'Export as PDF…' },
+      ...exportItems(formatOf(id)),
       { type: 'separator' },
       { id: 'delete', label: 'Move to Trash…' }
     ])
     if (choice === 'rename') setRenamingProject(id)
+    else if (choice === 'settings') setProjectSettingsFor(id)
     else if (choice === 'reveal') void hermit.revealProject(id)
     else if (choice === 'delete') void deleteProject(id)
     else if (choice?.startsWith('export-')) void exportSheets(id, null, choice.slice(7) as ExportFormat)
@@ -548,9 +580,7 @@ export default function App() {
       { id: 'duplicate', label: 'Duplicate' },
       ...places.map((place, i) => ({ id: `place:${i}`, label: `Move to ${placeName(place)}` })),
       { type: 'separator' },
-      { id: 'export-md', label: 'Export as Markdown…' },
-      { id: 'export-html', label: 'Export as HTML…' },
-      { id: 'export-pdf', label: 'Export as PDF…' },
+      ...exportItems(sheet?.section === 'content' ? formatOf(projectId) : 'markdown'),
       ...(others.length
         ? [
             { type: 'separator' as const },
@@ -593,6 +623,19 @@ export default function App() {
     else if (choice === 'new-folder') void createFolder(null)
   }
 
+  /** The library's add button: a project in the open project's folder, or a folder at the top. */
+  const showLibraryNewMenu = async (at: { x: number; y: number }) => {
+    const choice = await hermit.showContextMenu(
+      [
+        { id: 'new-project', label: 'New Project' },
+        { id: 'new-folder', label: 'New Folder' }
+      ],
+      at
+    )
+    if (choice === 'new-project') void createProject()
+    else if (choice === 'new-folder') void createFolder()
+  }
+
   /** New sheets and subsections at the top level of a section, switching to it first so they show. */
   const showSectionMenu = async (to: Section) => {
     const choice = await hermit.showContextMenu([
@@ -606,6 +649,19 @@ export default function App() {
       await switchSection(to)
       void createSubsection(place)
     }
+  }
+
+  /** The sheet list's add button: a sheet after the open one, or a subsection, in the current section. */
+  const showNewMenu = async (at: { x: number; y: number }) => {
+    const choice = await hermit.showContextMenu(
+      [
+        { id: 'new', label: `New ${SECTION_NAMES[section].item}` },
+        { id: 'new-subsection', label: 'New Subsection' }
+      ],
+      at
+    )
+    if (choice === 'new') void createSheet()
+    else if (choice === 'new-subsection') void createSubsection()
   }
 
   const showSubsectionMenu = async (place: SheetPlace) => {
@@ -663,6 +719,11 @@ export default function App() {
     setMergeOpen(true)
   }
 
+  const closeProjectSettings = () => {
+    setProjectSettingsFor(null)
+    if (!prefs.preview) editor.current?.focus()
+  }
+
   const closeMerge = () => {
     setMergeOpen(false)
     if (!prefs.preview) editor.current?.focus()
@@ -675,13 +736,17 @@ export default function App() {
 
   const handleMenu = (action: MenuAction) => {
     // The editor sits under the settings overlay; don't edit it blind.
-    const editable = !prefs.preview && !settingsOpen && !mergeOpen && !conflicted
-    const run = (cmd: keyof typeof formatCommands) => editable && editor.current?.run(formatCommands[cmd])
+    const editable = !prefs.preview && !settingsOpen && !projectSettingsFor && !mergeOpen && !conflicted
+    const run = (cmd: FormatCommand) => {
+      const command = formatCommands[sheetFormat][cmd]
+      if (editable && command) editor.current?.run(command)
+    }
     switch (action) {
       case 'new-sheet': return void createSheet()
       case 'new-project': return void createProject()
       case 'export-sheet': return current && void exportSheets(current.projectId, [current.sheet.id])
       case 'export-project': return projectId && void exportSheets(projectId, null)
+      case 'project-settings': return projectId && setProjectSettingsFor(projectId)
       case 'toggle-library': return togglePref('showLibrary')
       case 'toggle-sheets': return togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
@@ -726,6 +791,7 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const project = projects.find((p) => p.id === projectId)
+  const settingsProject = projects.find((p) => p.id === projectSettingsFor)
   const totalWords = sheets.filter((s) => s.section === section).reduce((sum, s) => sum + s.wordCount, 0)
   const previewSource = prefs.preview && current ? liveDoc.current.toString() : ''
   const shortcutModifier = hermit.platform === 'darwin' ? '⌘' : 'Ctrl+'
@@ -745,8 +811,7 @@ export default function App() {
           renamingId={renamingProject}
           renamingFolder={renamingFolder}
           onSelect={(id) => id !== projectId && void openProject(id)}
-          onCreate={() => void createProject()}
-          onCreateFolder={() => void createFolder()}
+          onNewMenu={(at) => void showLibraryNewMenu(at)}
           onOpenSettings={() => openSettings('appearance')}
           onRename={(id, name) => void renameProject(id, name)}
           onRenameEnd={() => {
@@ -780,7 +845,7 @@ export default function App() {
           onSectionChange={(s) => void switchSection(s)}
           onSelect={(id) => projectId && id !== current?.sheet.id && void openSheet(projectId, id)}
           onCreate={(place) => void createSheet('', place)}
-          onCreateSubsection={() => void createSubsection()}
+          onNewMenu={(at) => void showNewMenu(at)}
           onStartRenameSubsection={setRenamingSubsection}
           onRenameSubsection={(from, name) => void renameSubsection(from, name)}
           onRenameSubsectionEnd={() => setRenamingSubsection(null)}
@@ -788,6 +853,7 @@ export default function App() {
           onSectionMenu={(s) => void showSectionMenu(s)}
           onMove={(item, target) => void moveItem(item, target)}
           onContextMenu={(id) => void showSheetMenu(id)}
+          onOpenProjectSettings={() => projectId && setProjectSettingsFor(projectId)}
         />
       )}
 
@@ -860,6 +926,7 @@ export default function App() {
                 ref={editor}
                 docKey={current.key}
                 content={current.sheet.content}
+                format={sheetFormat}
                 focus={prefs.focus}
                 typewriter={prefs.typewriter}
                 grammar={prefs.grammar ? prefs.dialect : null}
@@ -868,7 +935,7 @@ export default function App() {
                 readOnly={conflicted}
                 onChange={handleChange}
               />
-              {prefs.preview && <Preview markdown={previewSource} />}
+              {prefs.preview && <Preview text={previewSource} format={sheetFormat} />}
             </>
           ) : (
             ready && (
@@ -929,6 +996,13 @@ export default function App() {
           sync={sync}
           onOpenMerge={openMerge}
           onClose={closeSettings}
+        />
+      )}
+      {settingsProject && (
+        <ProjectSettings
+          project={settingsProject}
+          onChange={(patch) => void updateProjectSettings(settingsProject.id, patch)}
+          onClose={closeProjectSettings}
         />
       )}
       {mergeOpen && sync && <MergeEditor sync={sync} onClose={closeMerge} />}

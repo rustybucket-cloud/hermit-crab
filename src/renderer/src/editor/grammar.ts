@@ -2,6 +2,7 @@ import { forceLinting, linter, lintKeymap, type Action, type Diagnostic } from '
 import { StateEffect, type Extension } from '@codemirror/state'
 import { EditorView, keymap, ViewPlugin } from '@codemirror/view'
 import type { Lint, Linter, Suggestion } from 'harper.js'
+import type { ContentFormat } from '../../../shared/types'
 
 /**
  * Grammar checking with Harper, which runs entirely on this computer in a web worker.
@@ -244,13 +245,14 @@ const grammarTheme = EditorView.theme({
 
 // ── Assembly ────────────────────────────────────────────────────────────────
 
-export function grammarChecker(dialect: GrammarDialect): Extension {
+/** Screenplays are checked as plain text, since Fountain isn't Markdown. */
+export function grammarChecker(dialect: GrammarDialect, format: ContentFormat = 'markdown'): Extension {
   return [
     linter(
       async (view) => {
         const source = view.state.doc.toString()
         const { harper, linter } = await getLinter(dialect)
-        const lints = await linter.lint(source, { language: 'markdown' })
+        const lints = await linter.lint(source, { language: format === 'fountain' ? 'plaintext' : 'markdown' })
         return (
           lints
             .filter((lint) => !ignored.has(ignoreKey(source, lint)))

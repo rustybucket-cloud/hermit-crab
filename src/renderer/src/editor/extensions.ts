@@ -3,7 +3,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { EditorSelection, EditorState, RangeSetBuilder, type Extension, type SelectionRange } from '@codemirror/state'
+import { EditorSelection, EditorState, Prec, RangeSetBuilder, type Extension, type SelectionRange } from '@codemirror/state'
 import {
   Decoration,
   type DecorationSet,
@@ -16,6 +16,8 @@ import {
   type Command
 } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
+import type { ContentFormat } from '../../../shared/types'
+import { fountain } from './fountain'
 
 // ── Look ────────────────────────────────────────────────────────────────────
 
@@ -238,16 +240,47 @@ export const toggleQuote: Command = (view) =>
     return allQuoted ? text.replace(/^(\s*)>\s?/, '$1') : `> ${text}`
   })
 
-export const formatCommands = {
-  bold: toggleWrap('**'),
-  italic: toggleWrap('_'),
-  code: toggleWrap('`'),
-  link: insertLink,
-  heading: cycleHeading,
-  quote: toggleQuote
+export type FormatCommand = 'bold' | 'italic' | 'underline' | 'code' | 'link' | 'heading' | 'quote'
+
+/** What each format offers. Fountain has emphasis but no code, links, headings or quotes. */
+export const formatCommands: Record<ContentFormat, Partial<Record<FormatCommand, Command>>> = {
+  markdown: {
+    bold: toggleWrap('**'),
+    italic: toggleWrap('_'),
+    code: toggleWrap('`'),
+    link: insertLink,
+    heading: cycleHeading,
+    quote: toggleQuote
+  },
+  fountain: {
+    bold: toggleWrap('**'),
+    italic: toggleWrap('*'),
+    underline: toggleWrap('_')
+  }
+}
+
+const FORMAT_KEYS: Record<FormatCommand, string> = {
+  bold: 'Mod-b',
+  italic: 'Mod-i',
+  underline: 'Mod-u',
+  code: 'Mod-e',
+  link: 'Mod-k',
+  heading: 'Mod-Alt-h',
+  quote: "Mod-Alt-'"
 }
 
 // ── Assembly ────────────────────────────────────────────────────────────────
+
+/** Styling and formatting keys for the sheet's format. Swapped in place if a project changes format. */
+export function formatExtensions(format: ContentFormat): Extension[] {
+  const commands = Object.entries(formatCommands[format]) as [FormatCommand, Command][]
+  return [
+    format === 'fountain'
+      ? fountain
+      : [markdown({ base: markdownLanguage, codeLanguages: languages }), syntaxHighlighting(markdownStyle)],
+    Prec.high(keymap.of(commands.map(([name, run]) => ({ key: FORMAT_KEYS[name], run }))))
+  ]
+}
 
 export function baseExtensions(): Extension[] {
   return [
@@ -256,19 +289,11 @@ export function baseExtensions(): Extension[] {
     EditorView.lineWrapping,
     EditorState.allowMultipleSelections.of(true),
     EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }),
-    markdown({ base: markdownLanguage, codeLanguages: languages }),
-    syntaxHighlighting(markdownStyle),
     search({ top: false }),
     highlightSelectionMatches(),
     placeholder('Start writing…'),
     theme,
     keymap.of([
-      { key: 'Mod-b', run: formatCommands.bold },
-      { key: 'Mod-i', run: formatCommands.italic },
-      { key: 'Mod-e', run: formatCommands.code },
-      { key: 'Mod-k', run: formatCommands.link },
-      { key: 'Mod-Alt-h', run: formatCommands.heading },
-      { key: "Mod-Alt-'", run: formatCommands.quote },
       ...searchKeymap,
       ...historyKeymap,
       ...defaultKeymap,

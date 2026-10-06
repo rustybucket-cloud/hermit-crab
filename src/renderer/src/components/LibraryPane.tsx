@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
 import type { ProjectSummary } from '../../../shared/types'
-import { ChevronIcon, FolderIcon, FolderPlusIcon, GearIcon, PlusIcon } from './Icons'
+import { ChevronIcon, FolderIcon, GearIcon, PlusIcon } from './Icons'
 
 export const SHEET_DRAG_TYPE = 'application/x-hermit-sheet'
 const LIBRARY_DRAG_TYPE = 'application/x-hermit-library-item'
@@ -15,8 +15,8 @@ interface Props {
   renamingId: string | null
   renamingFolder: string | null
   onSelect(id: string): void
-  onCreate(): void
-  onCreateFolder(): void
+  /** The new-item menu, shown over the footer's add button. */
+  onNewMenu(at: { x: number; y: number }): void
   onOpenSettings(): void
   onRename(id: string, name: string): void
   onRenameEnd(): void
@@ -231,17 +231,20 @@ export function LibraryPane(props: Props) {
         {renderLevel(null, 0)}
       </nav>
       <footer className="library-footer">
-        <button className="ghost-button" onClick={props.onCreate} title="New Project (⇧⌘N)">
-          <PlusIcon /> New Project
+        <button
+          className="ghost-button"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            props.onNewMenu({ x: rect.left, y: rect.top })
+          }}
+          title="New…"
+          aria-haspopup="menu"
+        >
+          <PlusIcon /> New
         </button>
-        <div className="library-footer-actions">
-          <button className="icon-button" onClick={props.onCreateFolder} title="New Folder">
-            <FolderPlusIcon />
-          </button>
-          <button className="icon-button" onClick={props.onOpenSettings} title="Settings (⌘,)">
-            <GearIcon />
-          </button>
-        </div>
+        <button className="icon-button" onClick={props.onOpenSettings} title="Settings (⌘,)">
+          <GearIcon />
+        </button>
       </footer>
     </aside>
   )

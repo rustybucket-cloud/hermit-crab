@@ -2,6 +2,7 @@
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-serif: 'Iowan Old Style', Charter, 'Palatino Linotype', Georgia, serif;
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --font-screenplay: 'Courier Prime', 'Courier New', Courier, monospace;
   --measure: 46em;
 
   --bg-library: #ecebe8;
@@ -234,11 +235,6 @@ button {
   line-height: 26px;
   font-size: 12px;
   color: var(--text-muted);
-}
-
-.library-footer-actions {
-  display: flex;
-  gap: 2px;
 }
 
 .project-name {
@@ -802,6 +798,97 @@ button {
   border: 1px solid var(--border-strong);
   padding: 0.4em 0.8em;
   text-align: left;
+}
+
+/* A screenplay previews as it prints: Courier, sixty characters to the line, indents measured from the left margin. */
+
+.preview.screenplay {
+  max-width: calc(60ch + 80px);
+  font-family: var(--font-screenplay);
+  line-height: 1.5;
+}
+
+.screenplay p,
+.screenplay h3 {
+  margin: 1.5em 0 0;
+  font: inherit;
+}
+
+.screenplay > :first-child {
+  margin-top: 0;
+}
+
+.screenplay .scene {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.screenplay .scene-number {
+  padding-left: 2ch;
+}
+
+.screenplay .character {
+  margin-left: 22ch;
+}
+
+.screenplay .parenthetical {
+  margin: 0 0 0 16ch;
+  max-width: 25ch;
+}
+
+.screenplay .dialogue {
+  margin: 0 0 0 10ch;
+  max-width: 35ch;
+}
+
+.screenplay .transition {
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.screenplay .centered {
+  text-align: center;
+}
+
+.screenplay .lyric {
+  font-style: italic;
+}
+
+.preview.screenplay hr.page-break {
+  margin: 2.4em 0;
+  border: none;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.preview.screenplay hr.page-break::after {
+  content: none;
+}
+
+.screenplay .title-page {
+  padding-bottom: 3em;
+  margin-bottom: 3em;
+  border-bottom: 1px dashed var(--border-strong);
+}
+
+.screenplay .title-page-main {
+  text-align: center;
+}
+
+.screenplay .title-page-main .title {
+  margin-top: 0;
+  text-decoration: underline;
+  text-transform: uppercase;
+}
+
+.screenplay .title-page-extra {
+  margin-top: 3em;
+  color: var(--text-soft);
+}
+
+.screenplay .title-page-extra p {
+  margin-top: 0;
 }
 
 /* ── Settings ───────────────────────────────────────────────────────────── */

@@ -1,5 +1,8 @@
 // Pure text helpers shared by the main process (summaries) and renderer (live counts).
 
+import { fountainPlainText } from './fountain'
+import type { ContentFormat } from './types'
+
 const WORD = /[\p{L}\p{N}][\p{L}\p{N}'’_-]*/gu
 
 /** Strip inline markdown so titles and excerpts read as plain prose. */
@@ -44,8 +47,8 @@ export function readingMinutes(words: number): number {
 }
 
 /** Title is the first line of prose; excerpt is what follows. */
-export function summarize(markdown: string): { title: string; excerpt: string } {
-  const lines = markdown.split('\n')
+export function summarize(text: string, format: ContentFormat = 'markdown'): { title: string; excerpt: string } {
+  const lines = (format === 'fountain' ? fountainPlainText(text) : text).split('\n')
   let title = ''
   let i = 0
   let inFence = false

@@ -92,9 +92,11 @@ export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
-export const FolderPlusIcon = (p: SVGProps<SVGSVGElement>) => (
+export const SlidersIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-    <path d="M12 10.5v5M9.5 13h5" />
+    <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
+    <circle cx="15" cy="6" r="2" />
+    <circle cx="9" cy="12" r="2" />
+    <circle cx="17" cy="18" r="2" />
   </svg>
 )

@@ -9,6 +9,15 @@ export interface ProjectSummary {
   sheetCount: number
   wordCount: number
   updatedAt: number
+  settings: ProjectSettings
+}
+
+/** How a project's content is written: prose in Markdown, or a screenplay in Fountain. Notes are always Markdown. */
+export type ContentFormat = 'markdown' | 'fountain'
+
+/** Settings that belong to a project, kept in its folder so they sync with it. */
+export interface ProjectSettings {
+  format: ContentFormat
 }
 
 /** The content is the work itself, the part that gets exported; notes are the planning and research behind it. */
@@ -52,7 +61,8 @@ export interface Outline {
   items: OutlineItem[]
 }
 
-export type ExportFormat = 'md' | 'html' | 'pdf'
+/** `md` and `fountain` save the text as written; which one fits depends on the project. */
+export type ExportFormat = 'md' | 'fountain' | 'html' | 'pdf'
 
 export interface ContextMenuItem {
   id: string
@@ -67,6 +77,7 @@ export type MenuAction =
   | 'new-project'
   | 'export-sheet'
   | 'export-project'
+  | 'project-settings'
   | 'toggle-library'
   | 'toggle-sheets'
   | 'toggle-sidebars'
@@ -145,6 +156,7 @@ export interface HermitApi {
   renameProject(projectId: string, name: string): Promise<ProjectSummary>
   deleteProject(projectId: string): Promise<boolean>
   revealProject(projectId: string): Promise<void>
+  updateProjectSettings(projectId: string, patch: Partial<ProjectSettings>): Promise<ProjectSummary>
   /** Folders of projects, by path within the library, such as `Fiction` and `Fiction/Novels`. */
   listFolders(): Promise<string[]>
   /** Resolves with the new folder's path; its name may differ to avoid a clash. */
@@ -170,7 +182,8 @@ export interface HermitApi {
   searchSheets(projectId: string, query: string): Promise<string[]>
   /** Without ids, exports the project's content. Without a format, the user is asked to pick one. */
   exportSheets(projectId: string, sheetIds: string[] | null, format?: ExportFormat): Promise<string | null>
-  showContextMenu(items: ContextMenuEntry[]): Promise<string | null>
+  /** Shows at the pointer, or at `at` in window coordinates, such as below a button. */
+  showContextMenu(items: ContextMenuEntry[], at?: { x: number; y: number }): Promise<string | null>
   getSyncState(): Promise<SyncState>
   updateSyncSettings(patch: Partial<SyncSettings>): Promise<SyncState>
   /** Point the library at a GitHub repository and run a first sync. */

@@ -8,6 +8,7 @@ import type {
   MenuAction,
   OutlineItem,
   OutlineTarget,
+  ProjectSettings,
   SheetPlace,
   SyncSettings
 } from '../shared/types'
@@ -257,6 +258,8 @@ function buildMenu(): void {
         item('Export Sheet…', 'export-sheet', 'CmdOrCtrl+Shift+E'),
         item('Export Project…', 'export-project'),
         { type: 'separator' },
+        item('Project Settings…', 'project-settings'),
+        { type: 'separator' },
         { label: 'Show Library in Finder', click: () => shell.openPath(library.root) },
         { label: 'Change Library Location…', click: () => void chooseLibrary() },
         { type: 'separator' },
@@ -344,12 +347,12 @@ async function confirm(message: string, detail: string, action: string): Promise
   return response === 0
 }
 
-async function chooseExportFormat(): Promise<ExportFormat | undefined> {
-  const formats: ExportFormat[] = ['md', 'html', 'pdf']
+async function chooseExportFormat(screenplay: boolean): Promise<ExportFormat | undefined> {
+  const formats: ExportFormat[] = [screenplay ? 'fountain' : 'md', 'html', 'pdf']
   const options: Electron.MessageBoxOptions = {
     type: 'question',
     message: 'Export as…',
-    buttons: ['Markdown', 'HTML', 'PDF', 'Cancel'],
+    buttons: [screenplay ? 'Fountain' : 'Markdown', 'HTML', 'PDF', 'Cancel'],
     defaultId: 0,
     cancelId: 3
   }
@@ -372,6 +375,9 @@ function registerIpc(): void {
     changed(library.createProject(name, folder))
   )
   ipcMain.handle('projects:rename', (_e, id: string, name: string) => changed(library.renameProject(id, name)))
+  ipcMain.handle('projects:update-settings', (_e, id: string, patch: Partial<ProjectSettings>) =>
+    changed(library.updateProjectSettings(id, patch))
+  )
   ipcMain.handle('projects:reveal', (_e, id: string) => library.revealProject(id))
   ipcMain.handle('projects:delete', async (_e, id: string) => {
     const name = id.slice(id.lastIndexOf('/') + 1)
@@ -444,9 +450,9 @@ function registerIpc(): void {
   ipcMain.handle('sheets:search', (_e, projectId: string, query: string) => library.searchSheets(projectId, query))
 
   ipcMain.handle('export', async (_e, projectId: string, sheetIds: string[] | null, format?: ExportFormat) => {
-    format ??= await chooseExportFormat()
-    if (!format) return null
     const doc = await library.compile(projectId, sheetIds ?? undefined)
+    format ??= await chooseExportFormat(doc.format === 'fountain')
+    if (!format) return null
     return exportDocument(mainWindow, doc, format)
   })
 
@@ -463,7 +469,7 @@ function registerIpc(): void {
   ipcMain.handle('sync:agent', () => sync.resolveWithAgent())
   ipcMain.handle('sync:cancel-agent', () => sync.cancelAgent())
 
-  ipcMain.handle('context-menu', (event, entries: ContextMenuEntry[]) => {
+  ipcMain.handle('context-menu', (event, entries: ContextMenuEntry[], at?: { x: number; y: number }) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
     return new Promise<string | null>((resolve) => {
       const menu = Menu.buildFromTemplate(
@@ -474,7 +480,8 @@ function registerIpc(): void {
         )
       )
       // The close callback can fire before the click handler; give the click a moment to win.
-      menu.popup({ window: win, callback: () => setTimeout(() => resolve(null), 50) })
+      const position = at && { x: Math.round(at.x), y: Math.round(at.y) }
+      menu.popup({ window: win, ...position, callback: () => setTimeout(() => resolve(null), 50) })
     })
   })
 }

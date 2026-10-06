@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { ConflictFile, SyncAgent, SyncSettings, SyncState, SyncStatus } from '../shared/types'
 import { summarize } from '../shared/text'
+import { normalizeProjectSettings } from './library'
 import { childEnv, findExecutable } from './shell-env'
 
 /**
@@ -455,23 +456,30 @@ export class GitSync {
     return `Update library${where}`
   }
 
-  /** Sheet ordering files are easy to merge mechanically: keep our order, then add anything new from GitHub. */
+  /**
+   * Project meta files are easy to merge mechanically: keep our order, then add anything new from GitHub.
+   * Settings changed on both sides keep ours.
+   */
   private async autoResolveMeta(): Promise<void> {
     const conflicted = await this.names(['diff', '--name-only', '--diff-filter=U'])
     for (const file of conflicted.filter((f) => path.posix.basename(f) === '.hermit.json')) {
-      const read = async (stage: number): Promise<string[] | null> => {
+      const read = async (stage: number): Promise<{ order: string[]; settings?: unknown } | null> => {
         const raw = await this.show(`:${stage}:${file}`)
         if (raw === null) return null
         try {
-          const order = JSON.parse(raw).order
-          return Array.isArray(order) ? order.filter((x: unknown): x is string => typeof x === 'string') : []
+          const { order, settings } = JSON.parse(raw)
+          return {
+            order: Array.isArray(order) ? order.filter((x: unknown): x is string => typeof x === 'string') : [],
+            settings
+          }
         } catch {
-          return []
+          return { order: [] }
         }
       }
       const [ours, theirs] = await Promise.all([read(2), read(3)])
-      const order = [...(ours ?? []), ...(theirs ?? []).filter((id) => !ours?.includes(id))]
-      await fs.writeFile(this.abs(file), JSON.stringify({ order }, null, 2))
+      const order = [...(ours?.order ?? []), ...(theirs?.order ?? []).filter((id) => !ours?.order.includes(id))]
+      const settings = normalizeProjectSettings(ours?.settings ?? theirs?.settings)
+      await fs.writeFile(this.abs(file), JSON.stringify({ settings, order }, null, 2))
       await this.git(['add', '--', file])
     }
   }

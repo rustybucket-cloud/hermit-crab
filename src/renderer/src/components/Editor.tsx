@@ -2,7 +2,8 @@ import { openSearchPanel } from '@codemirror/search'
 import { Compartment, EditorSelection, EditorState, Transaction, type Text } from '@codemirror/state'
 import { EditorView, type Command } from '@codemirror/view'
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
-import { baseExtensions, focusMode, typewriterMode } from '../editor/extensions'
+import type { ContentFormat } from '../../../shared/types'
+import { baseExtensions, focusMode, formatExtensions, typewriterMode } from '../editor/extensions'
 import { grammarChecker, type GrammarDialect } from '../editor/grammar'
 
 export interface EditorHandle {
@@ -17,6 +18,8 @@ interface Props {
   /** Changes whenever a different sheet is loaded. */
   docKey: string
   content: string
+  /** Markdown, or Fountain for a screenplay's content. */
+  format: ContentFormat
   focus: boolean
   typewriter: boolean
   /** The dialect to check grammar in, or null to leave grammar alone. */
@@ -35,6 +38,7 @@ const positions = new Map<string, { anchor: number; head: number; scrollTop: num
 export function Editor({
   docKey,
   content,
+  format,
   focus,
   typewriter,
   grammar,
@@ -52,13 +56,14 @@ export function Editor({
   const typewriterSlot = useRef(new Compartment())
   const readOnlySlot = useRef(new Compartment())
   const grammarSlot = useRef(new Compartment())
+  const formatSlot = useRef(new Compartment())
   // Suggestions can't be applied to a read-only sheet, so don't offer them.
   const checking = readOnly ? null : grammar
-  const modes = useRef({ focus, typewriter, readOnly, checking })
+  const modes = useRef({ format, focus, typewriter, readOnly, checking })
 
   useEffect(() => {
     onChangeRef.current = onChange
-    modes.current = { focus, typewriter, readOnly, checking }
+    modes.current = { format, focus, typewriter, readOnly, checking }
   })
 
   useImperativeHandle(ref, () => ({
@@ -104,10 +109,13 @@ export function Editor({
       doc: content,
       extensions: [
         baseExtensions(),
+        formatSlot.current.of(formatExtensions(modes.current.format)),
         focusSlot.current.of(modes.current.focus ? focusMode : []),
         typewriterSlot.current.of(modes.current.typewriter ? typewriterMode : []),
         readOnlySlot.current.of(EditorState.readOnly.of(modes.current.readOnly)),
-        grammarSlot.current.of(modes.current.checking ? grammarChecker(modes.current.checking) : []),
+        grammarSlot.current.of(
+          modes.current.checking ? grammarChecker(modes.current.checking, modes.current.format) : []
+        ),
         EditorView.updateListener.of((update) => {
           // Remote changes are already on disk; don't save them back.
           const local = update.transactions.some((tr) => tr.docChanged && !tr.annotation(Transaction.remote))
@@ -154,8 +162,14 @@ export function Editor({
   }, [readOnly])
 
   useEffect(() => {
-    view.current?.dispatch({ effects: grammarSlot.current.reconfigure(checking ? grammarChecker(checking) : []) })
-  }, [checking])
+    view.current?.dispatch({ effects: formatSlot.current.reconfigure(formatExtensions(format)) })
+  }, [format])
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: grammarSlot.current.reconfigure(checking ? grammarChecker(checking, format) : [])
+    })
+  }, [checking, format])
 
   useEffect(() => {
     view.current?.requestMeasure()

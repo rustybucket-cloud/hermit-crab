@@ -10,7 +10,7 @@ A quiet place to write. Everything you write is plain **Markdown**, saved automa
 
 ## How it's organised
 
-- **Projects** live in the left column. Each one is just a folder on disk. Group them into folders with the folder button at the bottom of the column, and drag projects onto a folder to file them there.
+- **Projects** live in the left column. Each one is just a folder on disk. Group them into folders with the **+ New** button at the bottom of the column, and drag projects onto a folder to file them there.
 - **Sheets** live in the middle column. Each sheet is one Markdown file. Its first line becomes its title.
 - Every project has two sections, switched at the top of the middle column. **Content** is the work itself. **Notes** hold everything behind it: plans, outlines, research, characters.
 - The **editor** is on the right.
@@ -75,7 +75,7 @@ This is a note. Notes sit beside the content but aren't part of it, so they're t
 - Characters, places, timelines
 - Ideas you're not ready to use yet
 
-Group notes into subsections, such as *Characters* or *Research*, with the folder button at the top of the list, and nest subsections inside each other as deep as you like. Drag a note onto a subsection to file it there.
+Group notes into subsections, such as *Characters* or *Research*, with the **+** button at the top of the list, and nest subsections inside each other as deep as you like. Drag a note onto a subsection to file it there.
 
 Right-click a sheet and choose **Move to Notes** to set it aside, or drag it onto the **Notes** tab. Notes move back to the content the same way.
 

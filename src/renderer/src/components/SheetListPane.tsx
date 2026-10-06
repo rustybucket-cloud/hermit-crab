@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'rea
 import type { OutlineItem, OutlineTarget, Section, SheetPlace, SheetSummary } from '../../../shared/types'
 import { formatCount, formatDate } from '../format'
 import { depthOf, isWithin, parentSubsection, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
-import { ChevronIcon, ComposeIcon, FolderPlusIcon, PlusIcon, SearchIcon } from './Icons'
+import { ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
 import { blankContextMenu, RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
 
 const SUBSECTION_DRAG_TYPE = 'application/x-hermit-subsection'
@@ -28,7 +28,8 @@ interface Props {
   onSectionChange(section: Section): void
   onSelect(id: string): void
   onCreate(place?: SheetPlace): void
-  onCreateSubsection(): void
+  /** The new-item menu, shown below the header's add button. */
+  onNewMenu(at: { x: number; y: number }): void
   onStartRenameSubsection(subsection: string): void
   onRenameSubsection(place: SheetPlace, name: string): void
   onRenameSubsectionEnd(): void
@@ -37,6 +38,7 @@ interface Props {
   onSectionMenu(section: Section): void
   onMove(item: OutlineItem, target: OutlineTarget): void
   onContextMenu(id: string): void
+  onOpenProjectSettings(): void
 }
 
 type Where = 'before' | 'after' | 'into'
@@ -272,11 +274,27 @@ export function SheetListPane(props: Props) {
           <span className="pane-title-name">{props.projectName}</span>
           {projectId && <span className="pane-title-meta">{formatCount(props.totalWords, 'word')}</span>}
         </div>
-        <button className="icon-button" onClick={props.onCreateSubsection} disabled={!projectId} title="New Subsection">
-          <FolderPlusIcon />
+        <button
+          className="icon-button"
+          onClick={props.onOpenProjectSettings}
+          disabled={!projectId}
+          title="Project Settings"
+          aria-label="Project Settings"
+        >
+          <SlidersIcon />
         </button>
-        <button className="icon-button" onClick={() => props.onCreate()} disabled={!projectId} title={`New ${item} (⌘N)`}>
-          <ComposeIcon />
+        <button
+          className="icon-button"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            props.onNewMenu({ x: rect.left, y: rect.bottom + 4 })
+          }}
+          disabled={!projectId}
+          title="New…"
+          aria-label="New…"
+          aria-haspopup="menu"
+        >
+          <PlusIcon />
         </button>
       </header>
 
