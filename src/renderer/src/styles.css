@@ -1435,7 +1435,8 @@ button {
   color: var(--text);
 }
 
-.icon-button.on {
+.icon-button.on,
+.icon-button.on:hover:not(:disabled) {
   color: var(--accent);
 }
 
