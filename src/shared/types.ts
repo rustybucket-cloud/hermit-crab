@@ -25,6 +25,7 @@ export interface SheetSummary extends SheetPlace {
   /**
    * Path within the project without the `.md` extension, such as `<name>` or `Part One/<name>`.
    * Notes live in a `Notes` folder, so their ids are `Notes/<name>`, or `Notes/Characters/<name>`.
+   * Canvases, which are always notes, keep their extension: `Notes/<name>.canvas`.
    */
   id: string
   title: string
@@ -34,6 +35,7 @@ export interface SheetSummary extends SheetPlace {
 }
 
 export interface Sheet extends SheetSummary {
+  /** Markdown, or for a canvas, its JSON. */
   content: string
 }
 
@@ -64,6 +66,7 @@ export type ContextMenuEntry = ContextMenuItem | { type: 'separator' }
 
 export type MenuAction =
   | 'new-sheet'
+  | 'new-canvas'
   | 'new-project'
   | 'export-sheet'
   | 'export-project'
@@ -158,6 +161,12 @@ export interface HermitApi {
   readSheet(projectId: string, sheetId: string): Promise<Sheet>
   writeSheet(projectId: string, sheetId: string, content: string): Promise<SheetSummary>
   createSheet(projectId: string, content?: string, afterId?: string, place?: SheetPlace): Promise<Sheet>
+  /** `place` must be in the notes. The canvas's name may differ to avoid a clash. */
+  createCanvas(projectId: string, place: SheetPlace, name?: string, content?: string, afterId?: string): Promise<Sheet>
+  /** Resolves with the ids that changed, old to new. */
+  renameCanvas(projectId: string, sheetId: string, name: string): Promise<Record<string, string>>
+  /** Copy an image into the project. Resolves with its path within the project. */
+  saveAttachment(projectId: string, name: string, data: Uint8Array): Promise<string>
   deleteSheet(projectId: string, sheetId: string): Promise<boolean>
   moveSheet(fromProject: string, sheetId: string, toProject: string): Promise<void>
   /** Reorder or refile a sheet or subsection. Resolves with the sheet ids that changed, old to new. */

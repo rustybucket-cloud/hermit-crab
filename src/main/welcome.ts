@@ -1,3 +1,5 @@
+import { serializeCanvas } from '../shared/canvas'
+
 export const WELCOME_PROJECT = 'Getting Started'
 
 const mod = process.platform === 'darwin' ? '⌘' : 'Ctrl+'
@@ -77,8 +79,53 @@ This is a note. Notes sit beside the content but aren't part of it, so they're t
 
 Group notes into subsections, such as *Characters* or *Research*, with the folder button at the top of the list, and nest subsections inside each other as deep as you like. Drag a note onto a subsection to file it there.
 
+Notes can also be **canvases**: boards of cards you arrange freely and connect. Make one with the canvas button at the top of the notes list.
+
 Right-click a sheet and choose **Move to Notes** to set it aside, or drag it onto the **Notes** tab. Notes move back to the content the same way.
 
 On disk, notes are Markdown files in the project's \`Notes\` folder, and each subsection is a folder.
 `
 ]
+
+/** A small canvas that shows off cards, headings, connections and a linked note. */
+export const WELCOME_CANVAS = (noteFile: string) =>
+  serializeCanvas({
+    nodes: [
+      { id: 'heading', type: 'text', text: '# Planning Board', x: -400, y: -300, width: 420, height: 70 },
+      {
+        id: 'cards',
+        type: 'text',
+        text: '**Cards** hold Markdown. Double-click empty space to add one, and double-click a card to edit it.',
+        x: -400,
+        y: -200,
+        width: 300,
+        height: 120
+      },
+      {
+        id: 'connect',
+        type: 'text',
+        text: 'Drag from the dot on any edge of a card to **connect** it to another. Drop on empty space to start a new card.',
+        x: -400,
+        y: 0,
+        width: 300,
+        height: 120,
+        color: '5'
+      },
+      {
+        id: 'more',
+        type: 'text',
+        text: 'Add **headings**, **linked notes** and **images** from the toolbar. Drag notes in from the list, or drop and paste images.',
+        x: 0,
+        y: -200,
+        width: 300,
+        height: 120,
+        color: '4'
+      },
+      { id: 'note', type: 'file', file: noteFile, x: 0, y: 0, width: 380, height: 320 }
+    ],
+    edges: [
+      { id: 'e1', fromNode: 'cards', fromSide: 'bottom', toNode: 'connect', toSide: 'top', toEnd: 'arrow' },
+      { id: 'e2', fromNode: 'cards', fromSide: 'right', toNode: 'more', toSide: 'left', toEnd: 'arrow' },
+      { id: 'e3', fromNode: 'more', fromSide: 'bottom', toNode: 'note', toSide: 'top', toEnd: 'arrow', label: 'a linked note' }
+    ]
+  })

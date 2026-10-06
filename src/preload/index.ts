@@ -24,6 +24,10 @@ const api: HermitApi = {
   writeSheet: (projectId, sheetId, content) => ipcRenderer.invoke('sheets:write', projectId, sheetId, content),
   createSheet: (projectId, content, afterId, place) =>
     ipcRenderer.invoke('sheets:create', projectId, content, afterId, place),
+  createCanvas: (projectId, place, name, content, afterId) =>
+    ipcRenderer.invoke('canvases:create', projectId, place, name, content, afterId),
+  renameCanvas: (projectId, sheetId, name) => ipcRenderer.invoke('canvases:rename', projectId, sheetId, name),
+  saveAttachment: (projectId, name, data) => ipcRenderer.invoke('attachments:save', projectId, name, data),
   deleteSheet: (projectId, sheetId) => ipcRenderer.invoke('sheets:delete', projectId, sheetId),
   moveSheet: (fromProject, sheetId, toProject) => ipcRenderer.invoke('sheets:move', fromProject, sheetId, toProject),
   moveInOutline: (projectId, item, target) => ipcRenderer.invoke('outline:move', projectId, item, target),

@@ -1,5 +1,6 @@
 import type { Text } from '@codemirror/state'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { isCanvasId, summarizeCanvas } from '../../shared/canvas'
 import { countWords, readingMinutes } from '../../shared/text'
 import type {
   ExportFormat,
@@ -12,6 +13,7 @@ import type {
   SheetPlace,
   SheetSummary
 } from '../../shared/types'
+import { CanvasView } from './components/CanvasView'
 import { Editor, type EditorHandle } from './components/Editor'
 import { EyeIcon, FocusIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
@@ -84,6 +86,19 @@ interface OpenSheet {
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error'
 
+/** What the status bar counts: words and characters, or for a canvas, its cards and connections. */
+interface Stats {
+  words: number
+  chars: number
+  canvas?: string
+}
+
+function statsOf(sheetId: string, text: string): Stats {
+  if (!isCanvasId(sheetId)) return { words: countWords(text), chars: text.length }
+  const { excerpt, wordCount } = summarizeCanvas(text)
+  return { words: wordCount, chars: text.length, canvas: excerpt }
+}
+
 export default function App() {
   const [prefs, setPrefs] = useState<Prefs>(() => loadJson(PREFS_KEY, DEFAULT_PREFS))
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -95,13 +110,15 @@ export default function App() {
   const [outline, setOutline] = useState<OutlineItem[]>([])
   // Path of the subsection being named, in the active section.
   const [renamingSubsection, setRenamingSubsection] = useState<string | null>(null)
+  // The canvas being named in the list.
+  const [renamingSheet, setRenamingSheet] = useState<string | null>(null)
   const [current, setCurrent] = useState<OpenSheet | null>(null)
   const [folders, setFolders] = useState<string[]>([])
   const [renamingProject, setRenamingProject] = useState<string | null>(null)
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<Set<string> | null>(null)
-  const [stats, setStats] = useState({ words: 0, chars: 0 })
+  const [stats, setStats] = useState<Stats>({ words: 0, chars: 0 })
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [ready, setReady] = useState(false)
   const [theme, setTheme] = useTheme()
@@ -111,7 +128,8 @@ export default function App() {
   const [mergeOpen, setMergeOpen] = useState(false)
 
   const editor = useRef<EditorHandle>(null)
-  const pending = useRef<{ projectId: string; sheetId: string; doc: Text } | null>(null)
+  // A canvas's edits arrive as its whole file.
+  const pending = useRef<{ projectId: string; sheetId: string; doc: Text | string } | null>(null)
   const liveDoc = useRef<Text | string>('')
   const saveTimer = useRef<number | undefined>(undefined)
   const statsTimer = useRef<number | undefined>(undefined)
@@ -149,18 +167,16 @@ export default function App() {
     }
   }
 
-  const handleChange = (doc: Text) => {
+  const handleChange = (doc: Text | string) => {
     if (!current) return
-    pending.current = { projectId: current.projectId, sheetId: current.sheet.id, doc }
+    const sheetId = current.sheet.id
+    pending.current = { projectId: current.projectId, sheetId, doc }
     liveDoc.current = doc
     setSaveState('unsaved')
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(flush, 600)
     window.clearTimeout(statsTimer.current)
-    statsTimer.current = window.setTimeout(() => {
-      const text = doc.toString()
-      setStats({ words: countWords(text), chars: text.length })
-    }, 150)
+    statsTimer.current = window.setTimeout(() => setStats(statsOf(sheetId, doc.toString())), 150)
   }
 
   // ── Loading ───────────────────────────────────────────────────────────────
@@ -190,7 +206,7 @@ export default function App() {
       const sheet = await hermit.readSheet(pid, sheetId)
       if (seq !== loadSeq.current) return
       liveDoc.current = sheet.content
-      setStats({ words: sheet.wordCount, chars: sheet.content.length })
+      setStats(statsOf(sheet.id, sheet.content))
       setCurrent({ projectId: pid, sheet, key: `${pid}/${sheetId}#${seq}` })
       setSection(sheet.section)
       lastInSection.current.set(`${pid}:${sheet.section}`, sheetId)
@@ -250,9 +266,11 @@ export default function App() {
       return
     }
     const sheet = await hermit.readSheet(projectId, id)
-    editor.current?.replaceContent(sheet.content)
     liveDoc.current = sheet.content
-    setStats({ words: sheet.wordCount, chars: sheet.content.length })
+    setStats(statsOf(id, sheet.content))
+    // A canvas starts over from the new file; the editor keeps its place in the text.
+    if (isCanvasId(id)) setCurrent({ projectId, sheet, key: `${projectId}/${id}#${++loadSeq.current}` })
+    else editor.current?.replaceContent(sheet.content)
   }
 
   const syncChangedHandler = useRef(handleSyncChanged)
@@ -274,6 +292,7 @@ export default function App() {
   }, [sync?.status])
 
   const conflicted = Boolean(current && sync?.conflicts.includes(sheetPath(current.projectId, current.sheet.id)))
+  const onCanvas = Boolean(current && isCanvasId(current.sheet.id))
 
   // ── Search ────────────────────────────────────────────────────────────────
 
@@ -401,11 +420,43 @@ export default function App() {
     await openSheet(pid, sheet.id)
   }
 
+  /** New canvases go in the notes: after the open note, or at the end of `place` when given. */
+  const createCanvas = async (place?: SheetPlace) => {
+    if (!projectId) return
+    const pid = projectId
+    await flush()
+    setQuery('')
+    const here = current?.projectId === pid && current.sheet.section === 'notes' ? current.sheet : null
+    const target = place ?? { section: 'notes' as const, subsection: here?.subsection ?? null }
+    const afterId = here && samePlace(here, target) ? here.id : undefined
+    const canvas = await hermit.createCanvas(pid, target, 'Untitled Canvas', undefined, afterId)
+    await refreshSheets(pid)
+    await openSheet(pid, canvas.id)
+    setPrefs((p) => ({ ...p, showSheets: true }))
+    setRenamingSheet(canvas.id)
+  }
+
+  const renameCanvas = async (id: string, name: string) => {
+    setRenamingSheet(null)
+    if (!projectId) return
+    const pid = projectId
+    await flush()
+    try {
+      const renamed = await hermit.renameCanvas(pid, id, name)
+      discardPending((p) => p.projectId === pid && p.sheetId in renamed)
+      await retarget(pid, renamed, await refreshSheets(pid))
+    } catch (err) {
+      console.error('Rename failed', err)
+    }
+  }
+
   const duplicateSheet = async (id: string) => {
     if (!projectId) return
     await flush()
     const source = await hermit.readSheet(projectId, id)
-    const copy = await hermit.createSheet(projectId, source.content, id, source)
+    const copy = isCanvasId(id)
+      ? await hermit.createCanvas(projectId, source, `${source.title} Copy`, source.content, id)
+      : await hermit.createSheet(projectId, source.content, id, source)
     await Promise.all([refreshSheets(projectId), refreshProjects()])
     await openSheet(projectId, copy.id)
   }
@@ -439,8 +490,17 @@ export default function App() {
   }
 
   /** The open sheet's file moved; keep editing it under its new id without reloading. */
-  const retarget = (pid: string, renamed: Record<string, string>, list: SheetSummary[]) => {
-    if (current?.projectId !== pid) return
+  const retarget = async (pid: string, renamed: Record<string, string>, list: SheetSummary[]) => {
+    if (current?.projectId !== pid || !Object.keys(renamed).length) return
+    const openId = renamed[current.sheet.id] ?? current.sheet.id
+    if (isCanvasId(openId)) {
+      // Moving sheets rewrites the links on canvases that show them, so the open canvas reloads.
+      const sheet = await hermit.readSheet(pid, openId)
+      setCurrent({ projectId: pid, sheet, key: `${pid}/${openId}#${++loadSeq.current}` })
+      lastInSection.current.set(`${pid}:${sheet.section}`, openId)
+      localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId: openId }))
+      return
+    }
     const moved = list.find((s) => s.id === renamed[current.sheet.id])
     if (!moved) return
     const { id, section: movedTo, subsection } = moved
@@ -454,15 +514,22 @@ export default function App() {
     if (!projectId) return
     const pid = projectId
     await flush()
-    const renamed = await hermit.moveInOutline(pid, item, target)
+    let renamed: Record<string, string>
+    try {
+      renamed = await hermit.moveInOutline(pid, item, target)
+    } catch (err) {
+      console.error('Move failed', err)
+      return
+    }
     // Anything typed since the flush belongs to a path that's gone.
     discardPending((p) => p.projectId === pid && p.sheetId in renamed)
     const toSection = 'into' in target ? target.into.section : ('before' in target ? target.before : target.after).section
     if (item.kind === 'sheet' && toSection !== item.section) {
       await selectNeighbour(pid, item.id, sheets)
+      if (current?.sheet.id !== item.id) await retarget(pid, renamed, [])
       return
     }
-    retarget(pid, renamed, await refreshSheets(pid))
+    await retarget(pid, renamed, await refreshSheets(pid))
   }
 
   const createSubsection = async (parent: SheetPlace = { section, subsection: null }) => {
@@ -479,7 +546,7 @@ export default function App() {
     await flush()
     const renamed = await hermit.renameSubsection(pid, place, name)
     discardPending((p) => p.projectId === pid && p.sheetId in renamed)
-    retarget(pid, renamed, await refreshSheets(pid))
+    await retarget(pid, renamed, await refreshSheets(pid))
   }
 
   const deleteSubsection = async (place: SheetPlace) => {
@@ -543,14 +610,21 @@ export default function App() {
       { section: s, subsection: null },
       ...outline.flatMap((i) => (i.kind === 'subsection' && i.section === s ? [{ section: s, subsection: i.subsection }] : []))
     ])
-    const places = allPlaces.filter((place) => !sheet || !samePlace(sheet, place))
+    const canvas = isCanvasId(id)
+    // Canvases stay in the notes, and only export as themselves, from Finder.
+    const places = allPlaces.filter((place) => (!sheet || !samePlace(sheet, place)) && (!canvas || place.section === 'notes'))
     const choice = await hermit.showContextMenu([
+      ...(canvas ? [{ id: 'rename', label: 'Rename' }] : []),
       { id: 'duplicate', label: 'Duplicate' },
       ...places.map((place, i) => ({ id: `place:${i}`, label: `Move to ${placeName(place)}` })),
-      { type: 'separator' },
-      { id: 'export-md', label: 'Export as Markdown…' },
-      { id: 'export-html', label: 'Export as HTML…' },
-      { id: 'export-pdf', label: 'Export as PDF…' },
+      ...(canvas
+        ? []
+        : [
+            { type: 'separator' as const },
+            { id: 'export-md', label: 'Export as Markdown…' },
+            { id: 'export-html', label: 'Export as HTML…' },
+            { id: 'export-pdf', label: 'Export as PDF…' }
+          ]),
       ...(others.length
         ? [
             { type: 'separator' as const },
@@ -560,7 +634,8 @@ export default function App() {
       { type: 'separator' },
       { id: 'delete', label: 'Move to Trash…' }
     ])
-    if (choice === 'duplicate') void duplicateSheet(id)
+    if (choice === 'rename') setRenamingSheet(id)
+    else if (choice === 'duplicate') void duplicateSheet(id)
     else if (choice?.startsWith('place:') && sheet) {
       const item: OutlineItem = { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection }
       void moveItem(item, { into: places[Number(choice.slice(6))] })
@@ -587,12 +662,14 @@ export default function App() {
   const showSubsectionMenu = async (place: SheetPlace) => {
     const choice = await hermit.showContextMenu([
       { id: 'new', label: `New ${SECTION_NAMES[place.section].item}` },
+      ...(place.section === 'notes' ? [{ id: 'new-canvas', label: 'New Canvas' }] : []),
       { id: 'new-subsection', label: 'New Subsection' },
       { id: 'rename', label: 'Rename' },
       { type: 'separator' },
       { id: 'delete', label: 'Move to Trash…' }
     ])
     if (choice === 'new') void createSheet('', place)
+    else if (choice === 'new-canvas') void createCanvas(place)
     else if (choice === 'new-subsection') void createSubsection(place)
     else if (choice === 'rename') setRenamingSubsection(place.subsection)
     else if (choice === 'delete') void deleteSubsection(place)
@@ -651,18 +728,19 @@ export default function App() {
 
   const handleMenu = (action: MenuAction) => {
     // The editor sits under the settings overlay; don't edit it blind.
-    const editable = !prefs.preview && !settingsOpen && !mergeOpen && !conflicted
+    const editable = !prefs.preview && !settingsOpen && !mergeOpen && !conflicted && !onCanvas
     const run = (cmd: keyof typeof formatCommands) => editable && editor.current?.run(formatCommands[cmd])
     switch (action) {
       case 'new-sheet': return void createSheet()
+      case 'new-canvas': return void createCanvas()
       case 'new-project': return void createProject()
-      case 'export-sheet': return current && void exportSheets(current.projectId, [current.sheet.id])
+      case 'export-sheet': return current && !onCanvas && void exportSheets(current.projectId, [current.sheet.id])
       case 'export-project': return projectId && void exportSheets(projectId, null)
       case 'toggle-library': return togglePref('showLibrary')
       case 'toggle-sheets': return togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
       case 'toggle-section': return void switchSection(otherSection(section))
-      case 'toggle-preview': return current && togglePref('preview')
+      case 'toggle-preview': return current && !onCanvas && togglePref('preview')
       case 'toggle-focus': return toggleFocus()
       case 'toggle-typewriter': return togglePref('typewriter')
       case 'toggle-grammar': return togglePref('grammar')
@@ -748,6 +826,7 @@ export default function App() {
           sheets={visibleSheets}
           items={sectionOutline}
           renamingSubsection={renamingSubsection}
+          renamingSheet={renamingSheet}
           totalWords={totalWords}
           activeId={current?.sheet.id ?? null}
           query={query}
@@ -755,10 +834,14 @@ export default function App() {
           onSectionChange={(s) => void switchSection(s)}
           onSelect={(id) => projectId && id !== current?.sheet.id && void openSheet(projectId, id)}
           onCreate={(place) => void createSheet('', place)}
+          onCreateCanvas={() => void createCanvas()}
           onCreateSubsection={() => void createSubsection()}
           onStartRenameSubsection={setRenamingSubsection}
           onRenameSubsection={(from, name) => void renameSubsection(from, name)}
           onRenameSubsectionEnd={() => setRenamingSubsection(null)}
+          onStartRenameSheet={setRenamingSheet}
+          onRenameSheet={(id, name) => void renameCanvas(id, name)}
+          onRenameSheetEnd={() => setRenamingSheet(null)}
           onSubsectionMenu={(name) => void showSubsectionMenu(name)}
           onMove={(item, target) => void moveItem(item, target)}
           onContextMenu={(id) => void showSheetMenu(id)}
@@ -803,6 +886,7 @@ export default function App() {
             <button
               className={`icon-button${prefs.typewriter ? ' on' : ''}`}
               onClick={() => togglePref('typewriter')}
+              disabled={onCanvas}
               title="Typewriter Mode (⇧⌘T)"
             >
               <TypewriterIcon />
@@ -810,7 +894,7 @@ export default function App() {
             <button
               className={`icon-button${prefs.preview ? ' on' : ''}`}
               onClick={() => togglePref('preview')}
-              disabled={!current}
+              disabled={!current || onCanvas}
               title="Preview (⇧⌘P)"
             >
               <EyeIcon />
@@ -828,7 +912,18 @@ export default function App() {
         )}
 
         <div className="editor-body">
-          {current ? (
+          {current && onCanvas ? (
+            <CanvasView
+              key={current.key}
+              projectId={current.projectId}
+              sheetId={current.sheet.id}
+              content={current.sheet.content}
+              sheets={sheets}
+              readOnly={conflicted}
+              onChange={handleChange}
+              onOpenSheet={(id) => void openSheet(current.projectId, id)}
+            />
+          ) : current ? (
             <>
               <Editor
                 ref={editor}
@@ -869,9 +964,15 @@ export default function App() {
 
         {current && (
           <footer className="status-bar">
-            <span>{formatCount(stats.words, 'word')}</span>
-            <span>{formatCount(stats.chars, 'character')}</span>
-            <span>{readingMinutes(stats.words)} min read</span>
+            {stats.canvas !== undefined ? (
+              <span>{stats.canvas}</span>
+            ) : (
+              <>
+                <span>{formatCount(stats.words, 'word')}</span>
+                <span>{formatCount(stats.chars, 'character')}</span>
+                <span>{readingMinutes(stats.words)} min read</span>
+              </>
+            )}
             <span className={`save-state ${saveState}`}>
               {saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Not saved — retrying on next edit' : 'Saving…'}
             </span>

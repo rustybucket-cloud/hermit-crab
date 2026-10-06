@@ -98,3 +98,69 @@ export const FolderPlusIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M12 10.5v5M9.5 13h5" />
   </svg>
 )
+
+export const CanvasIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="7" height="6" rx="1.5" />
+    <rect x="14" y="14" width="7" height="6" rx="1.5" />
+    <path d="M10 7h3a2 2 0 0 1 2 2v5" />
+  </svg>
+)
+
+export const CardIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="4" y="5" width="16" height="14" rx="2" />
+    <path d="M8 10h8M8 14h5" />
+  </svg>
+)
+
+export const HeadingIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M6 5v14M16 5v14M6 12h10" />
+  </svg>
+)
+
+export const NoteLinkIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 3v5h5M9 13h6M9 17h4" />
+  </svg>
+)
+
+export const ImageIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="9" cy="10" r="1.8" />
+    <path d="m21 16-5-5-9 9" />
+  </svg>
+)
+
+export const TrashIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+  </svg>
+)
+
+export const MinusIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 12h14" />
+  </svg>
+)
+
+export const FitIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+  </svg>
+)
+
+export const OpenIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+  </svg>
+)
+
+export const ArrowIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 12h16M14 6l6 6-6 6" />
+  </svg>
+)

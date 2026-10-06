@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type {
   ContextMenuEntry,
   ExportFormat,
@@ -14,7 +15,7 @@ import type {
 import { exportDocument } from './export'
 import { Library } from './library'
 import { GitSync, normalizeSyncSettings } from './sync'
-import { WELCOME_NOTES, WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
+import { WELCOME_CANVAS, WELCOME_NOTES, WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
 
 interface Settings {
   libraryPath?: string
@@ -52,10 +53,29 @@ async function openLibrary(root: string): Promise<void> {
   if (!existed) {
     const project = await library.createProject(WELCOME_PROJECT)
     for (const content of WELCOME_SHEETS) await library.createSheet(project.id, content)
-    for (const content of WELCOME_NOTES) {
-      await library.createSheet(project.id, content, undefined, { section: 'notes', subsection: null })
-    }
+    const notes = { section: 'notes', subsection: null } as const
+    const created = []
+    for (const content of WELCOME_NOTES) created.push(await library.createSheet(project.id, content, undefined, notes))
+    await library.createCanvas(project.id, notes, 'Planning Board', WELCOME_CANVAS(`${created[0].id}.md`))
   }
+}
+
+// ── Library files ───────────────────────────────────────────────────────────
+
+// Canvases show images from the library as `hermit-file://library/<path in the library>`.
+protocol.registerSchemesAsPrivileged([{ scheme: 'hermit-file', privileges: { standard: true, secure: true } }])
+
+function registerFileProtocol(): void {
+  protocol.handle('hermit-file', (request) => {
+    const url = new URL(request.url)
+    const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    const root = path.resolve(library.root)
+    const file = path.resolve(root, ...parts)
+    if (url.host !== 'library' || parts.some((p) => p.startsWith('.')) || !file.startsWith(root + path.sep)) {
+      return new Response('Not found', { status: 404 })
+    }
+    return net.fetch(pathToFileURL(file).toString())
+  })
 }
 
 function send(action: MenuAction): void {
@@ -252,6 +272,7 @@ function buildMenu(): void {
       label: 'File',
       submenu: [
         item('New Sheet', 'new-sheet', 'CmdOrCtrl+N'),
+        item('New Canvas', 'new-canvas', 'CmdOrCtrl+Alt+N'),
         item('New Project', 'new-project', 'CmdOrCtrl+Shift+N'),
         { type: 'separator' },
         item('Export Sheet…', 'export-sheet', 'CmdOrCtrl+Shift+E'),
@@ -409,6 +430,17 @@ function registerIpc(): void {
   ipcMain.handle('sheets:create', (_e, projectId: string, content?: string, afterId?: string, place?: SheetPlace) =>
     changed(library.createSheet(projectId, content, afterId, place))
   )
+  ipcMain.handle(
+    'canvases:create',
+    (_e, projectId: string, place: SheetPlace, name?: string, content?: string, afterId?: string) =>
+      changed(library.createCanvas(projectId, place, name, content, afterId))
+  )
+  ipcMain.handle('canvases:rename', (_e, projectId: string, id: string, name: string) =>
+    changed(library.renameCanvas(projectId, id, name))
+  )
+  ipcMain.handle('attachments:save', (_e, projectId: string, name: string, data: Uint8Array) =>
+    changed(library.saveAttachment(projectId, name, data))
+  )
   ipcMain.handle('sheets:delete', async (_e, projectId: string, id: string) => {
     const sheet = await library.readSheet(projectId, id)
     const ok = await confirm(`Move “${sheet.title || 'Untitled'}” to the Trash?`, 'You can restore it from the Trash later.', 'Move to Trash')
@@ -489,6 +521,7 @@ app.whenReady().then(async () => {
     process.env['HERMIT_LIBRARY'] ?? settings.libraryPath ?? path.join(app.getPath('documents'), 'Hermit Crab')
   )
   sync = createSync()
+  registerFileProtocol()
   registerIpc()
   buildMenu()
   createWindow()
