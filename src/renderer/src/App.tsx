@@ -1,7 +1,17 @@
 import type { Text } from '@codemirror/state'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { countWords, readingMinutes } from '../../shared/text'
-import type { ExportFormat, MenuAction, ProjectSummary, Sheet, SheetSummary } from '../../shared/types'
+import type {
+  ExportFormat,
+  MenuAction,
+  OutlineItem,
+  OutlineTarget,
+  ProjectSummary,
+  Section,
+  Sheet,
+  SheetPlace,
+  SheetSummary
+} from '../../shared/types'
 import { Editor, type EditorHandle } from './components/Editor'
 import { EyeIcon, FocusIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
@@ -12,6 +22,7 @@ import { SheetListPane } from './components/SheetListPane'
 import { formatCommands } from './editor/extensions'
 import { defaultDialect, type GrammarDialect } from './editor/grammar'
 import { formatCount } from './format'
+import { isWithin, otherSection, placeName, samePlace, SECTION_NAMES } from './sections'
 import { sheetPath, syncLabel, timeAgo, useSyncState } from './sync'
 import { useTheme } from './theme'
 
@@ -77,9 +88,17 @@ export default function App() {
   const [prefs, setPrefs] = useState<Prefs>(() => loadJson(PREFS_KEY, DEFAULT_PREFS))
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectId, setProjectId] = useState<string | null>(null)
+  // Every sheet in the project, both sections; the list shows the active section's.
   const [sheets, setSheets] = useState<SheetSummary[]>([])
+  const [section, setSection] = useState<Section>('content')
+  // Sheets and subsections of both sections, in reading order.
+  const [outline, setOutline] = useState<OutlineItem[]>([])
+  // Path of the subsection being named, in the active section.
+  const [renamingSubsection, setRenamingSubsection] = useState<string | null>(null)
   const [current, setCurrent] = useState<OpenSheet | null>(null)
+  const [folders, setFolders] = useState<string[]>([])
   const [renamingProject, setRenamingProject] = useState<string | null>(null)
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<Set<string> | null>(null)
   const [stats, setStats] = useState({ words: 0, chars: 0 })
@@ -97,6 +116,8 @@ export default function App() {
   const saveTimer = useRef<number | undefined>(undefined)
   const statsTimer = useRef<number | undefined>(undefined)
   const loadSeq = useRef(0)
+  // The sheet last open in each project section, so switching sections returns to it.
+  const lastInSection = useRef(new Map<string, string>())
 
   useEffect(() => localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)), [prefs])
 
@@ -145,14 +166,16 @@ export default function App() {
   // ── Loading ───────────────────────────────────────────────────────────────
 
   const refreshProjects = useCallback(async () => {
-    const list = await hermit.listProjects()
+    const [list, folderList] = await Promise.all([hermit.listProjects(), hermit.listFolders()])
     setProjects(list)
+    setFolders(folderList)
     return list
   }, [])
 
   const refreshSheets = useCallback(async (pid: string) => {
-    const list = await hermit.listSheets(pid)
+    const { sheets: list, items } = await hermit.listOutline(pid)
     setSheets(list)
+    setOutline(items)
     return list
   }, [])
 
@@ -169,6 +192,8 @@ export default function App() {
       liveDoc.current = sheet.content
       setStats({ words: sheet.wordCount, chars: sheet.content.length })
       setCurrent({ projectId: pid, sheet, key: `${pid}/${sheetId}#${seq}` })
+      setSection(sheet.section)
+      lastInSection.current.set(`${pid}:${sheet.section}`, sheetId)
       localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId }))
     },
     [flush]
@@ -185,7 +210,8 @@ export default function App() {
         return
       }
       const list = await refreshSheets(pid)
-      const target = list.find((s) => s.id === preferredSheet) ?? list[0]
+      const target = list.find((s) => s.id === preferredSheet) ?? list.find((s) => s.section === 'content')
+      setSection(target?.section ?? 'content')
       await openSheet(pid, target?.id ?? null)
     },
     [flush, openSheet, refreshSheets]
@@ -220,7 +246,7 @@ export default function App() {
     // Anything typed in the moment since sync saved this sheet would overwrite what was just pulled.
     discardPending((p) => p.projectId === projectId && p.sheetId === id)
     if (!sheetList.some((s) => s.id === id)) {
-      await openSheet(projectId, sheetList[0]?.id ?? null)
+      await openSheet(projectId, sheetList.find((s) => s.section === section)?.id ?? null)
       return
     }
     const sheet = await hermit.readSheet(projectId, id)
@@ -263,16 +289,23 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [query, projectId, flush])
 
-  const visibleSheets = useMemo(
+  const matchingSheets = useMemo(
     () => (matches ? sheets.filter((s) => matches.has(s.id)) : sheets),
     [sheets, matches]
   )
+  const visibleSheets = useMemo(() => matchingSheets.filter((s) => s.section === section), [matchingSheets, section])
+  const sectionOutline = useMemo(() => outline.filter((i) => i.section === section), [outline, section])
+  const sectionCounts = {
+    content: matchingSheets.filter((s) => s.section === 'content').length,
+    notes: matchingSheets.filter((s) => s.section === 'notes').length
+  }
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  const createProject = async () => {
+  /** New projects go in the same folder as the open one. */
+  const createProject = async (folder = projects.find((p) => p.id === projectId)?.folder ?? null) => {
     await flush()
-    const project = await hermit.createProject('Untitled Project')
+    const project = await hermit.createProject('Untitled Project', folder)
     await refreshProjects()
     setPrefs((p) => ({ ...p, showLibrary: true }))
     await openProject(project.id)
@@ -284,15 +317,61 @@ export default function App() {
     await flush()
     try {
       const renamed = await hermit.renameProject(id, name)
+      projectsMoved(id, renamed.id)
       await refreshProjects()
-      if (projectId === id) {
-        setProjectId(renamed.id)
-        setCurrent((c) => (c && c.projectId === id ? { ...c, projectId: renamed.id } : c))
-        if (current) localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: renamed.id, sheetId: current.sheet.id }))
-      }
     } catch (err) {
       console.error('Rename failed', err)
     }
+  }
+
+  /** Projects at or under `from` now live under `to`. Keep the open one open without reloading it. */
+  const projectsMoved = (from: string, to: string) => {
+    if (from === to) return
+    const remap = (id: string) => (id === from || id.startsWith(`${from}/`) ? to + id.slice(from.length) : id)
+    if (pending.current) pending.current = { ...pending.current, projectId: remap(pending.current.projectId) }
+    if (projectId) setProjectId(remap(projectId))
+    setCurrent((c) => (c ? { ...c, projectId: remap(c.projectId) } : c))
+    if (current) {
+      localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: remap(current.projectId), sheetId: current.sheet.id }))
+    }
+  }
+
+  const createFolder = async (parent: string | null = null) => {
+    const folder = await hermit.createFolder('New Folder', parent)
+    await refreshProjects()
+    setPrefs((p) => ({ ...p, showLibrary: true }))
+    setRenamingFolder(folder)
+  }
+
+  const renameFolder = async (folder: string, name: string) => {
+    setRenamingFolder(null)
+    await flush()
+    try {
+      projectsMoved(folder, await hermit.renameFolder(folder, name))
+    } catch (err) {
+      console.error('Rename failed', err)
+    }
+    await refreshProjects()
+  }
+
+  const deleteFolder = async (folder: string) => {
+    await flush()
+    if (!(await hermit.deleteFolder(folder))) return
+    const inside = (id: string) => id.startsWith(`${folder}/`)
+    discardPending((p) => inside(p.projectId))
+    const list = await refreshProjects()
+    if (projectId && inside(projectId)) await openProject(list[0]?.id ?? null)
+  }
+
+  /** Move a project or folder into a folder, or to the top of the library with null. */
+  const moveInLibrary = async (libraryPath: string, folder: string | null) => {
+    await flush()
+    try {
+      projectsMoved(libraryPath, await hermit.moveInLibrary(libraryPath, folder))
+    } catch (err) {
+      console.error('Move failed', err)
+    }
+    await refreshProjects()
   }
 
   const deleteProject = async (id: string) => {
@@ -303,7 +382,8 @@ export default function App() {
     if (projectId === id) await openProject(list[0]?.id ?? null)
   }
 
-  const createSheet = async (content = '') => {
+  /** New sheets go after the open one, or at the end of `place` when given. */
+  const createSheet = async (content = '', place?: SheetPlace) => {
     let pid = projectId
     if (!pid) {
       const project = await hermit.createProject('Untitled Project')
@@ -313,8 +393,10 @@ export default function App() {
     }
     await flush()
     setQuery('')
-    const afterId = current?.projectId === pid ? current.sheet.id : undefined
-    const sheet = await hermit.createSheet(pid, content, afterId)
+    const here = current?.projectId === pid && current.sheet.section === section ? current.sheet : null
+    const target = place ?? { section, subsection: here?.subsection ?? null }
+    const afterId = here && samePlace(here, target) ? here.id : undefined
+    const sheet = await hermit.createSheet(pid, content, afterId, target)
     await Promise.all([refreshSheets(pid), refreshProjects()])
     await openSheet(pid, sheet.id)
   }
@@ -323,18 +405,20 @@ export default function App() {
     if (!projectId) return
     await flush()
     const source = await hermit.readSheet(projectId, id)
-    const copy = await hermit.createSheet(projectId, source.content, id)
+    const copy = await hermit.createSheet(projectId, source.content, id, source)
     await Promise.all([refreshSheets(projectId), refreshProjects()])
     await openSheet(projectId, copy.id)
   }
 
-  /** After a sheet leaves the list, select its neighbour. */
+  /** After a sheet leaves the list, select its neighbour in the same section. */
   const selectNeighbour = async (pid: string, removedId: string, before: SheetSummary[]) => {
     const list = await refreshSheets(pid)
     await refreshProjects()
     if (current?.sheet.id !== removedId) return
-    const index = before.findIndex((s) => s.id === removedId)
-    const next = list[Math.min(index, list.length - 1)]
+    const inSection = (l: SheetSummary[]) => l.filter((s) => s.section === current.sheet.section)
+    const index = inSection(before).findIndex((s) => s.id === removedId)
+    const remaining = inSection(list)
+    const next = remaining[Math.min(index, remaining.length - 1)]
     await openSheet(pid, next?.id ?? null)
   }
 
@@ -354,11 +438,71 @@ export default function App() {
     else await refreshProjects()
   }
 
-  const reorderSheets = async (order: string[]) => {
+  /** The open sheet's file moved; keep editing it under its new id without reloading. */
+  const retarget = (pid: string, renamed: Record<string, string>, list: SheetSummary[]) => {
+    if (current?.projectId !== pid) return
+    const moved = list.find((s) => s.id === renamed[current.sheet.id])
+    if (!moved) return
+    const { id, section: movedTo, subsection } = moved
+    setCurrent({ ...current, sheet: { ...current.sheet, id, section: movedTo, subsection } })
+    lastInSection.current.set(`${pid}:${movedTo}`, id)
+    localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId: id }))
+  }
+
+  /** Reorder or refile a sheet or subsection. */
+  const moveItem = async (item: OutlineItem, target: OutlineTarget) => {
     if (!projectId) return
-    const byId = new Map(sheets.map((s) => [s.id, s]))
-    setSheets(order.map((id) => byId.get(id)!).filter(Boolean))
-    await hermit.reorderSheets(projectId, order)
+    const pid = projectId
+    await flush()
+    const renamed = await hermit.moveInOutline(pid, item, target)
+    // Anything typed since the flush belongs to a path that's gone.
+    discardPending((p) => p.projectId === pid && p.sheetId in renamed)
+    const toSection = 'into' in target ? target.into.section : ('before' in target ? target.before : target.after).section
+    if (item.kind === 'sheet' && toSection !== item.section) {
+      await selectNeighbour(pid, item.id, sheets)
+      return
+    }
+    retarget(pid, renamed, await refreshSheets(pid))
+  }
+
+  const createSubsection = async (parent: SheetPlace = { section, subsection: null }) => {
+    if (!projectId) return
+    const place = await hermit.createSubsection(projectId, parent, 'New Subsection')
+    await refreshSheets(projectId)
+    setRenamingSubsection(place.subsection)
+  }
+
+  const renameSubsection = async (place: SheetPlace, name: string) => {
+    setRenamingSubsection(null)
+    if (!projectId) return
+    const pid = projectId
+    await flush()
+    const renamed = await hermit.renameSubsection(pid, place, name)
+    discardPending((p) => p.projectId === pid && p.sheetId in renamed)
+    retarget(pid, renamed, await refreshSheets(pid))
+  }
+
+  const deleteSubsection = async (place: SheetPlace) => {
+    if (!projectId || !place.subsection) return
+    await flush()
+    if (!(await hermit.deleteSubsection(projectId, place))) return
+    const wasOpen =
+      current?.projectId === projectId &&
+      current.sheet.section === place.section &&
+      isWithin(current.sheet.subsection, place.subsection)
+    if (wasOpen) discardPending((p) => p.projectId === projectId && p.sheetId === current.sheet.id)
+    const list = await refreshSheets(projectId)
+    if (wasOpen) await openSheet(projectId, list.find((s) => s.section === place.section)?.id ?? null)
+  }
+
+  /** Show the other section, picking up where you left off in it. */
+  const switchSection = async (to: Section) => {
+    if (!projectId || to === section) return
+    setSection(to)
+    const inSection = sheets.filter((s) => s.section === to)
+    const last = lastInSection.current.get(`${projectId}:${to}`)
+    const target = inSection.find((s) => s.id === last) ?? inSection[0]
+    await openSheet(projectId, target?.id ?? null)
   }
 
   const exportSheets = async (pid: string, ids: string[] | null, format?: ExportFormat) => {
@@ -393,22 +537,65 @@ export default function App() {
   const showSheetMenu = async (id: string) => {
     if (!projectId) return
     const others = projects.filter((p) => p.id !== projectId)
+    const sheet = sheets.find((s) => s.id === id)
+    // Every section and subsection, in outline order.
+    const allPlaces: SheetPlace[] = (['content', 'notes'] as const).flatMap((s) => [
+      { section: s, subsection: null },
+      ...outline.flatMap((i) => (i.kind === 'subsection' && i.section === s ? [{ section: s, subsection: i.subsection }] : []))
+    ])
+    const places = allPlaces.filter((place) => !sheet || !samePlace(sheet, place))
     const choice = await hermit.showContextMenu([
       { id: 'duplicate', label: 'Duplicate' },
+      ...places.map((place, i) => ({ id: `place:${i}`, label: `Move to ${placeName(place)}` })),
       { type: 'separator' },
       { id: 'export-md', label: 'Export as Markdown…' },
       { id: 'export-html', label: 'Export as HTML…' },
       { id: 'export-pdf', label: 'Export as PDF…' },
       ...(others.length
-        ? [{ type: 'separator' as const }, ...others.map((p) => ({ id: `move:${p.id}`, label: `Move to “${p.name}”` }))]
+        ? [
+            { type: 'separator' as const },
+            ...others.map((p) => ({ id: `move:${p.id}`, label: `Move to “${p.id.split('/').join(' › ')}”` }))
+          ]
         : []),
       { type: 'separator' },
       { id: 'delete', label: 'Move to Trash…' }
     ])
     if (choice === 'duplicate') void duplicateSheet(id)
+    else if (choice?.startsWith('place:') && sheet) {
+      const item: OutlineItem = { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection }
+      void moveItem(item, { into: places[Number(choice.slice(6))] })
+    }
     else if (choice === 'delete') void deleteSheet(id)
     else if (choice?.startsWith('export-')) void exportSheets(projectId, [id], choice.slice(7) as ExportFormat)
     else if (choice?.startsWith('move:')) void moveSheet(id, projectId, choice.slice(5))
+  }
+
+  const showFolderMenu = async (folder: string) => {
+    const choice = await hermit.showContextMenu([
+      { id: 'new-project', label: 'New Project' },
+      { id: 'new-folder', label: 'New Folder' },
+      { id: 'rename', label: 'Rename' },
+      { type: 'separator' },
+      { id: 'delete', label: 'Move to Trash…' }
+    ])
+    if (choice === 'new-project') void createProject(folder)
+    else if (choice === 'new-folder') void createFolder(folder)
+    else if (choice === 'rename') setRenamingFolder(folder)
+    else if (choice === 'delete') void deleteFolder(folder)
+  }
+
+  const showSubsectionMenu = async (place: SheetPlace) => {
+    const choice = await hermit.showContextMenu([
+      { id: 'new', label: `New ${SECTION_NAMES[place.section].item}` },
+      { id: 'new-subsection', label: 'New Subsection' },
+      { id: 'rename', label: 'Rename' },
+      { type: 'separator' },
+      { id: 'delete', label: 'Move to Trash…' }
+    ])
+    if (choice === 'new') void createSheet('', place)
+    else if (choice === 'new-subsection') void createSubsection(place)
+    else if (choice === 'rename') setRenamingSubsection(place.subsection)
+    else if (choice === 'delete') void deleteSubsection(place)
   }
 
   const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'typewriter' | 'grammar') =>
@@ -474,6 +661,7 @@ export default function App() {
       case 'toggle-library': return togglePref('showLibrary')
       case 'toggle-sheets': return togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
+      case 'toggle-section': return void switchSection(otherSection(section))
       case 'toggle-preview': return current && togglePref('preview')
       case 'toggle-focus': return toggleFocus()
       case 'toggle-typewriter': return togglePref('typewriter')
@@ -514,7 +702,7 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const project = projects.find((p) => p.id === projectId)
-  const totalWords = sheets.reduce((sum, s) => sum + s.wordCount, 0)
+  const totalWords = sheets.filter((s) => s.section === section).reduce((sum, s) => sum + s.wordCount, 0)
   const previewSource = prefs.preview && current ? liveDoc.current.toString() : ''
   const shortcutModifier = hermit.platform === 'darwin' ? '⌘' : 'Ctrl+'
 
@@ -528,16 +716,26 @@ export default function App() {
       {prefs.showLibrary && (
         <LibraryPane
           projects={projects}
+          folders={folders}
           activeId={projectId}
           renamingId={renamingProject}
+          renamingFolder={renamingFolder}
           onSelect={(id) => id !== projectId && void openProject(id)}
           onCreate={() => void createProject()}
+          onCreateFolder={() => void createFolder()}
           onOpenSettings={() => openSettings('appearance')}
           onRename={(id, name) => void renameProject(id, name)}
-          onRenameEnd={() => setRenamingProject(null)}
+          onRenameEnd={() => {
+            setRenamingProject(null)
+            setRenamingFolder(null)
+          }}
           onStartRename={setRenamingProject}
+          onRenameFolder={(folder, name) => void renameFolder(folder, name)}
+          onStartRenameFolder={setRenamingFolder}
           onContextMenu={(id) => void showProjectMenu(id)}
+          onFolderMenu={(folder) => void showFolderMenu(folder)}
           onDropSheet={(sheetId, from, to) => void moveSheet(sheetId, from, to)}
+          onMove={(libraryPath, folder) => void moveInLibrary(libraryPath, folder)}
         />
       )}
 
@@ -545,14 +743,24 @@ export default function App() {
         <SheetListPane
           projectId={projectId}
           projectName={project?.name ?? 'No Project'}
+          section={section}
+          counts={sectionCounts}
           sheets={visibleSheets}
+          items={sectionOutline}
+          renamingSubsection={renamingSubsection}
           totalWords={totalWords}
           activeId={current?.sheet.id ?? null}
           query={query}
           onQueryChange={setQuery}
+          onSectionChange={(s) => void switchSection(s)}
           onSelect={(id) => projectId && id !== current?.sheet.id && void openSheet(projectId, id)}
-          onCreate={() => void createSheet()}
-          onReorder={(order) => void reorderSheets(order)}
+          onCreate={(place) => void createSheet('', place)}
+          onCreateSubsection={() => void createSubsection()}
+          onStartRenameSubsection={setRenamingSubsection}
+          onRenameSubsection={(from, name) => void renameSubsection(from, name)}
+          onRenameSubsectionEnd={() => setRenamingSubsection(null)}
+          onSubsectionMenu={(name) => void showSubsectionMenu(name)}
+          onMove={(item, target) => void moveItem(item, target)}
           onContextMenu={(id) => void showSheetMenu(id)}
         />
       )}
@@ -581,6 +789,9 @@ export default function App() {
             </button>
           </div>
           <div className="toolbar-spacer" />
+          {(current?.sheet.section === 'notes' || current?.sheet.subsection) && (
+            <span className="place-label">{placeName(current.sheet)}</span>
+          )}
           <div className="toolbar-modes">
             <button
               className={`icon-button${prefs.focus ? ' on' : ''}`}
@@ -645,9 +856,9 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <p>No sheet selected.</p>
+                    <p>{section === 'notes' ? 'No note selected.' : 'No sheet selected.'}</p>
                     <button className="primary-button" onClick={() => void createSheet()}>
-                      <PlusIcon /> New Sheet
+                      <PlusIcon /> New {SECTION_NAMES[section].item}
                     </button>
                   </>
                 )}

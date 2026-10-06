@@ -1,14 +1,31 @@
 export interface ProjectSummary {
-  /** Folder name inside the library. Doubles as the display name. */
+  /** Path of the project's folder within the library, such as `Fiction/My Novel`. */
   id: string
+  /** The last part of the path. */
   name: string
+  /** Path of the folder of projects it's in, or null at the top of the library. */
+  folder: string | null
+  /** Counts cover the content only. */
   sheetCount: number
   wordCount: number
   updatedAt: number
 }
 
-export interface SheetSummary {
-  /** File name without the `.md` extension. */
+/** The content is the work itself, the part that gets exported; notes are the planning and research behind it. */
+export type Section = 'content' | 'notes'
+
+/** Where a sheet lives in its project: a section, and perhaps a subsection of it. */
+export interface SheetPlace {
+  section: Section
+  /** Path of the subsection within its section, such as `Part One` or `Characters/Minor`; null at the top level. */
+  subsection: string | null
+}
+
+export interface SheetSummary extends SheetPlace {
+  /**
+   * Path within the project without the `.md` extension, such as `<name>` or `Part One/<name>`.
+   * Notes live in a `Notes` folder, so their ids are `Notes/<name>`, or `Notes/Characters/<name>`.
+   */
   id: string
   title: string
   excerpt: string
@@ -18,6 +35,21 @@ export interface SheetSummary {
 
 export interface Sheet extends SheetSummary {
   content: string
+}
+
+/** One row of a project's outline: a sheet, or the heading of a subsection. */
+export type OutlineItem =
+  | ({ kind: 'sheet'; id: string } & SheetPlace)
+  | { kind: 'subsection'; section: Section; subsection: string }
+
+/** Where to move an outline item: next to another one, or to the end of a section or subsection. */
+export type OutlineTarget = { before: OutlineItem } | { after: OutlineItem } | { into: SheetPlace }
+
+export interface Outline {
+  /** Every sheet, content then notes, in reading order. */
+  sheets: SheetSummary[]
+  /** Sheets and subsections in reading order; each subsection's heading comes before what's in it. */
+  items: OutlineItem[]
 }
 
 export type ExportFormat = 'md' | 'html' | 'pdf'
@@ -38,6 +70,7 @@ export type MenuAction =
   | 'toggle-library'
   | 'toggle-sheets'
   | 'toggle-sidebars'
+  | 'toggle-section'
   | 'toggle-preview'
   | 'toggle-focus'
   | 'toggle-typewriter'
@@ -108,19 +141,34 @@ export interface ConflictFile {
 export interface HermitApi {
   platform: string
   listProjects(): Promise<ProjectSummary[]>
-  createProject(name: string): Promise<ProjectSummary>
+  createProject(name: string, folder?: string | null): Promise<ProjectSummary>
   renameProject(projectId: string, name: string): Promise<ProjectSummary>
   deleteProject(projectId: string): Promise<boolean>
   revealProject(projectId: string): Promise<void>
-  listSheets(projectId: string): Promise<SheetSummary[]>
+  /** Folders of projects, by path within the library, such as `Fiction` and `Fiction/Novels`. */
+  listFolders(): Promise<string[]>
+  /** Resolves with the new folder's path; its name may differ to avoid a clash. */
+  createFolder(name: string, parent?: string | null): Promise<string>
+  /** Resolves with the folder's new path. */
+  renameFolder(folder: string, name: string): Promise<string>
+  deleteFolder(folder: string): Promise<boolean>
+  /** Move a project or folder into a folder, or to the top of the library with null. Resolves with its new path. */
+  moveInLibrary(libraryPath: string, folder: string | null): Promise<string>
+  listOutline(projectId: string): Promise<Outline>
   readSheet(projectId: string, sheetId: string): Promise<Sheet>
   writeSheet(projectId: string, sheetId: string, content: string): Promise<SheetSummary>
-  createSheet(projectId: string, content?: string, afterId?: string): Promise<Sheet>
+  createSheet(projectId: string, content?: string, afterId?: string, place?: SheetPlace): Promise<Sheet>
   deleteSheet(projectId: string, sheetId: string): Promise<boolean>
-  reorderSheets(projectId: string, order: string[]): Promise<void>
   moveSheet(fromProject: string, sheetId: string, toProject: string): Promise<void>
+  /** Reorder or refile a sheet or subsection. Resolves with the sheet ids that changed, old to new. */
+  moveInOutline(projectId: string, item: OutlineItem, target: OutlineTarget): Promise<Record<string, string>>
+  /** Resolves with where it was made; its name may differ to avoid a clash. */
+  createSubsection(projectId: string, parent: SheetPlace, name: string): Promise<SheetPlace>
+  /** Resolves with the sheet ids that changed, old to new. */
+  renameSubsection(projectId: string, place: SheetPlace, name: string): Promise<Record<string, string>>
+  deleteSubsection(projectId: string, place: SheetPlace): Promise<boolean>
   searchSheets(projectId: string, query: string): Promise<string[]>
-  /** Without a format, the user is asked to pick one. */
+  /** Without ids, exports the project's content. Without a format, the user is asked to pick one. */
   exportSheets(projectId: string, sheetIds: string[] | null, format?: ExportFormat): Promise<string | null>
   showContextMenu(items: ContextMenuEntry[]): Promise<string | null>
   getSyncState(): Promise<SyncState>

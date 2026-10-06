@@ -176,6 +176,71 @@ button {
   color: inherit;
 }
 
+.project-list.drop-target {
+  box-shadow: inset 0 0 0 2px var(--selection);
+  border-radius: 8px;
+}
+
+/* A folder of projects. */
+.library-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 6px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: default;
+}
+
+.library-folder:hover {
+  background: var(--bg-hover);
+  color: var(--text-soft);
+}
+
+.library-folder.drop-target {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.library-folder-chevron {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  transition: transform 120ms ease;
+}
+
+.library-folder.open .library-folder-chevron {
+  transform: rotate(90deg);
+}
+
+.library-folder-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-folder.drop-target .project-count {
+  color: inherit;
+}
+
+.library-empty {
+  height: 26px;
+  padding: 0 10px;
+  line-height: 26px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.library-footer-actions {
+  display: flex;
+  gap: 2px;
+}
+
 .project-name {
   flex: 1;
   overflow: hidden;
@@ -239,6 +304,57 @@ button {
 .pane-title-meta {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.section-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 12px 8px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+}
+
+.section-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.section-tab:hover {
+  color: var(--text);
+}
+
+.section-tab.active {
+  background: var(--bg-editor);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.section-tab.drop-target {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.section-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.section-tab.drop-target .section-count {
+  color: inherit;
 }
 
 .search-field {
@@ -307,6 +423,99 @@ button {
   border-color: transparent;
 }
 
+.subsection-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin-top: 6px;
+  padding: 0 4px 0 6px;
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: default;
+}
+
+.subsection-header:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.subsection-header.drop-target {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.subsection-chevron {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+
+.subsection-header.open .subsection-chevron {
+  transform: rotate(90deg);
+}
+
+.subsection-header.drop-target .subsection-chevron,
+.subsection-header.drop-target .subsection-count {
+  color: inherit;
+}
+
+.subsection-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subsection-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.subsection-add {
+  width: 22px;
+  height: 22px;
+  visibility: hidden;
+}
+
+.subsection-header:hover .subsection-add {
+  visibility: visible;
+}
+
+.subsection-empty {
+  padding: 6px 12px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.subsection-empty.drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.subsection-header.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.subsection-header.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Dropping below the last row puts the item at the end of the section. */
+.sheet-list.drop-end::after {
+  content: '';
+  display: block;
+  margin: 0 4px;
+  border-top: 2px solid var(--accent);
+}
+
 .sheet-item.drop-before {
   box-shadow: inset 0 2px 0 var(--accent);
 }
@@ -354,11 +563,17 @@ button {
 
 .sheets .empty-hint {
   position: absolute;
-  top: 140px;
+  top: 170px;
   left: 0;
   right: 0;
   text-align: center;
   color: var(--text-muted);
+}
+
+.sheets .empty-hint p {
+  margin: 0 32px 10px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* ── Editor ─────────────────────────────────────────────────────────────── */
@@ -397,6 +612,25 @@ button {
 
 .toolbar-spacer {
   flex: 1;
+}
+
+/* Where the open sheet lives. Sheets at the top of the content need no label. */
+.place-label {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.focus-mode .place-label {
+  display: none;
 }
 
 .toolbar-modes {

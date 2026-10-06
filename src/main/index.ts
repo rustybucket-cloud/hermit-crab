@@ -2,11 +2,19 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'e
 import type { MenuItemConstructorOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { ContextMenuEntry, ExportFormat, MenuAction, SyncSettings } from '../shared/types'
+import type {
+  ContextMenuEntry,
+  ExportFormat,
+  MenuAction,
+  OutlineItem,
+  OutlineTarget,
+  SheetPlace,
+  SyncSettings
+} from '../shared/types'
 import { exportDocument } from './export'
 import { Library } from './library'
 import { GitSync, normalizeSyncSettings } from './sync'
-import { WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
+import { WELCOME_NOTES, WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
 
 interface Settings {
   libraryPath?: string
@@ -44,6 +52,9 @@ async function openLibrary(root: string): Promise<void> {
   if (!existed) {
     const project = await library.createProject(WELCOME_PROJECT)
     for (const content of WELCOME_SHEETS) await library.createSheet(project.id, content)
+    for (const content of WELCOME_NOTES) {
+      await library.createSheet(project.id, content, undefined, { section: 'notes', subsection: null })
+    }
   }
 }
 
@@ -288,6 +299,7 @@ function buildMenu(): void {
         item('Toggle Library', 'toggle-library', 'CmdOrCtrl+1'),
         item('Toggle Sheet List', 'toggle-sheets', 'CmdOrCtrl+2'),
         item('Toggle Sidebars', 'toggle-sidebars', 'CmdOrCtrl+\\'),
+        item('Switch Content / Notes', 'toggle-section', 'CmdOrCtrl+3'),
         { type: 'separator' },
         item('Toggle Preview', 'toggle-preview', 'CmdOrCtrl+Shift+P'),
         item('Focus Mode', 'toggle-focus', 'CmdOrCtrl+Shift+F'),
@@ -356,22 +368,46 @@ async function changed<T>(work: Promise<T>): Promise<T> {
 
 function registerIpc(): void {
   ipcMain.handle('projects:list', () => library.listProjects())
-  ipcMain.handle('projects:create', (_e, name: string) => changed(library.createProject(name)))
+  ipcMain.handle('projects:create', (_e, name: string, folder?: string | null) =>
+    changed(library.createProject(name, folder))
+  )
   ipcMain.handle('projects:rename', (_e, id: string, name: string) => changed(library.renameProject(id, name)))
   ipcMain.handle('projects:reveal', (_e, id: string) => library.revealProject(id))
   ipcMain.handle('projects:delete', async (_e, id: string) => {
-    const ok = await confirm(`Move “${id}” to the Trash?`, 'The project folder and all of its sheets will be moved to the Trash.', 'Move to Trash')
+    const name = id.slice(id.lastIndexOf('/') + 1)
+    const ok = await confirm(`Move “${name}” to the Trash?`, 'The project folder and all of its sheets will be moved to the Trash.', 'Move to Trash')
     if (ok) await changed(library.deleteProject(id))
     return ok
   })
 
-  ipcMain.handle('sheets:list', (_e, projectId: string) => library.listSheets(projectId))
+  ipcMain.handle('folders:list', () => library.listFolders())
+  ipcMain.handle('folders:create', (_e, name: string, parent?: string | null) =>
+    changed(library.createFolder(name, parent))
+  )
+  ipcMain.handle('folders:rename', (_e, folder: string, name: string) => changed(library.renameFolder(folder, name)))
+  ipcMain.handle('folders:delete', async (_e, folder: string) => {
+    const inside = (await library.listProjects()).filter((p) => p.id.startsWith(`${folder}/`)).length
+    const ok = await confirm(
+      `Move “${folder.slice(folder.lastIndexOf('/') + 1)}” to the Trash?`,
+      inside
+        ? `The ${inside === 1 ? 'project' : `${inside} projects`} in it will be moved to the Trash too.`
+        : 'It has no projects in it.',
+      'Move to Trash'
+    )
+    if (ok) await changed(library.deleteFolder(folder))
+    return ok
+  })
+  ipcMain.handle('library:move', (_e, libraryPath: string, folder: string | null) =>
+    changed(library.moveInLibrary(libraryPath, folder))
+  )
+
+  ipcMain.handle('outline:list', (_e, projectId: string) => library.listOutline(projectId))
   ipcMain.handle('sheets:read', (_e, projectId: string, id: string) => library.readSheet(projectId, id))
   ipcMain.handle('sheets:write', (_e, projectId: string, id: string, content: string) =>
     changed(library.writeSheet(projectId, id, content))
   )
-  ipcMain.handle('sheets:create', (_e, projectId: string, content?: string, afterId?: string) =>
-    changed(library.createSheet(projectId, content, afterId))
+  ipcMain.handle('sheets:create', (_e, projectId: string, content?: string, afterId?: string, place?: SheetPlace) =>
+    changed(library.createSheet(projectId, content, afterId, place))
   )
   ipcMain.handle('sheets:delete', async (_e, projectId: string, id: string) => {
     const sheet = await library.readSheet(projectId, id)
@@ -379,10 +415,32 @@ function registerIpc(): void {
     if (ok) await changed(library.deleteSheet(projectId, id))
     return ok
   })
-  ipcMain.handle('sheets:reorder', (_e, projectId: string, order: string[]) =>
-    changed(library.reorderSheets(projectId, order))
-  )
   ipcMain.handle('sheets:move', (_e, from: string, id: string, to: string) => changed(library.moveSheet(from, id, to)))
+  ipcMain.handle('outline:move', (_e, projectId: string, item: OutlineItem, target: OutlineTarget) =>
+    changed(library.moveInOutline(projectId, item, target))
+  )
+  ipcMain.handle('subsections:create', (_e, projectId: string, parent: SheetPlace, name: string) =>
+    changed(library.createSubsection(projectId, parent, name))
+  )
+  ipcMain.handle('subsections:rename', (_e, projectId: string, place: SheetPlace, name: string) =>
+    changed(library.renameSubsection(projectId, place, name))
+  )
+  ipcMain.handle('subsections:delete', async (_e, projectId: string, place: SheetPlace) => {
+    const sub = place.subsection ?? ''
+    const inside = (await library.listSheets(projectId)).filter(
+      (s) => s.section === place.section && (s.subsection === sub || s.subsection?.startsWith(`${sub}/`))
+    ).length
+    const noun = place.section === 'notes' ? 'note' : 'sheet'
+    const ok = await confirm(
+      `Move “${sub.slice(sub.lastIndexOf('/') + 1)}” to the Trash?`,
+      inside
+        ? `The ${inside === 1 ? noun : `${inside} ${noun}s`} in it will be moved to the Trash too.`
+        : `It has no ${noun}s in it.`,
+      'Move to Trash'
+    )
+    if (ok) await changed(library.deleteSubsection(projectId, place))
+    return ok
+  })
   ipcMain.handle('sheets:search', (_e, projectId: string, query: string) => library.searchSheets(projectId, query))
 
   ipcMain.handle('export', async (_e, projectId: string, sheetIds: string[] | null, format?: ExportFormat) => {

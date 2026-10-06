@@ -10,11 +10,12 @@ A quiet place to write. Everything you write is plain **Markdown**, saved automa
 
 ## How it's organised
 
-- **Projects** live in the left column. Each one is just a folder on disk.
+- **Projects** live in the left column. Each one is just a folder on disk. Group them into folders with the folder button at the bottom of the column, and drag projects onto a folder to file them there.
 - **Sheets** live in the middle column. Each sheet is one Markdown file. Its first line becomes its title.
+- Every project has two sections, switched at the top of the middle column. **Content** is the work itself. **Notes** hold everything behind it: plans, outlines, research, characters.
 - The **editor** is on the right.
 
-Drag sheets to reorder them, or drop a sheet onto another project to move it there. Right-click projects and sheets for more options.
+Either section can be organised into subsections — parts and chapters, say, or characters and research — and subsections can hold subsections. Drag sheets and subsections to reorder them, drop one onto a subsection to put it inside, or drop a sheet onto another project to move it there. Right-click projects, sheets and subsections for more options.
 `,
   `# Writing in Markdown
 
@@ -52,6 +53,7 @@ Use **Preview** (${mod}Shift+P) to see the rendered result.
 | Previous / next sheet | ${mod}${alt}↑ / ${mod}${alt}↓ |
 | Show / hide library | ${mod}1 |
 | Show / hide sheet list | ${mod}2 |
+| Switch content / notes | ${mod}3 |
 | Preview | ${mod}Shift+P |
 | Focus mode | ${mod}Shift+F |
 | Typewriter mode | ${mod}Shift+T |
@@ -59,6 +61,24 @@ Use **Preview** (${mod}Shift+P) to see the rendered result.
 
 **Focus mode** dims everything except the paragraph you're writing. **Typewriter mode** keeps the line you're on in the middle of the screen.
 
-When you're done, use **File → Export** to save a sheet or a whole project as Markdown, HTML or PDF.
+When you're done, use **File → Export** to save a sheet or a whole project as Markdown, HTML or PDF. Exporting a project exports its content; notes stay behind.
+`
+]
+
+export const WELCOME_NOTES = [
+  `# Notes
+
+This is a note. Notes sit beside the content but aren't part of it, so they're the place to plan and think out loud:
+
+- An outline, or a list of scenes still to write
+- Research, quotes and links
+- Characters, places, timelines
+- Ideas you're not ready to use yet
+
+Group notes into subsections, such as *Characters* or *Research*, with the folder button at the top of the list, and nest subsections inside each other as deep as you like. Drag a note onto a subsection to file it there.
+
+Right-click a sheet and choose **Move to Notes** to set it aside, or drag it onto the **Notes** tab. Notes move back to the content the same way.
+
+On disk, notes are Markdown files in the project's \`Notes\` folder, and each subsection is a folder.
 `
 ]
