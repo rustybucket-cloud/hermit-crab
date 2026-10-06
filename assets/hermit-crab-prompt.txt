@@ -1,7 +1,10 @@
 Generated with the built-in image_gen tool.
-Source: hermit-crab.png (opaque PNG with sandy background)
-Alternate version: hermit-crab-transparent.png (original icon with no background)
-Platform exports: hermit-crab.icns (macOS), hermit-crab.ico (Windows)
+App icon: hermit-crab.png/.icns/.ico, macOS-style tile built from hermit-crab-transparent.png
+  (1024 canvas, 824px superellipse (n=5) tile in #F3E6D0, crab scaled to 76% of the tile,
+  soft drop shadow 12px down / 14px blur / 30% black)
+Alternate versions:
+  hermit-crab-transparent.png/.icns/.ico (original icon with no background)
+  hermit-crab-sand.png/.icns/.ico (full-bleed opaque sandy background; prompt below)
 
 Use case: precise-object-edit
 Asset type: square desktop app icon for Hermit Crab.
