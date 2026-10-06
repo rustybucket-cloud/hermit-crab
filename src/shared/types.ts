@@ -193,6 +193,8 @@ export interface HermitApi {
   exportSheets(projectId: string, sheetIds: string[] | null, format?: ExportFormat): Promise<string | null>
   /** Shows at the pointer, or at `at` in window coordinates, such as below a button. */
   showContextMenu(items: ContextMenuEntry[], at?: { x: number; y: number }): Promise<string | null>
+  /** Replace the dock / window icon with a PNG data URL. */
+  setAppIcon(dataUrl: string): void
   getSyncState(): Promise<SyncState>
   updateSyncSettings(patch: Partial<SyncSettings>): Promise<SyncState>
   /** Point the library at a GitHub repository and run a first sync. */

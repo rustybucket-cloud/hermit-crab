@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, shell } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -141,7 +141,7 @@ function createWindow(): void {
     icon: appIcon,
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 18, y: 18 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1d1f' : '#fbfaf8',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#172131' : '#faf5ec',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -216,6 +216,15 @@ function finishClose(win: BrowserWindow): void {
   win.close()
   if (isQuitting) app.quit()
 }
+
+// The renderer redraws the icon in the current theme's colours.
+ipcMain.on('app:set-icon', (_e, dataUrl: string) => {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) return
+  const icon = nativeImage.createFromDataURL(dataUrl)
+  if (icon.isEmpty()) return
+  if (isMac) app.dock?.setIcon(icon)
+  else mainWindow?.setIcon(icon)
+})
 
 ipcMain.on('app:close-ready', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)

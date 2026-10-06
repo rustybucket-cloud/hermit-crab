@@ -5,6 +5,8 @@ App icon: hermit-crab.png/.icns/.ico, macOS-style tile built from hermit-crab-tr
 Alternate versions:
   hermit-crab-transparent.png/.icns/.ico (original icon with no background)
   hermit-crab-sand.png/.icns/.ico (full-bleed opaque sandy background; prompt below)
+  hermit-crab-foreground.png (hermit-crab.png with the tile keyed out, for the themed dock icon;
+  rebuild with: npx electron scripts/icon-foreground.cjs)
 
 Use case: precise-object-edit
 Asset type: square desktop app icon for Hermit Crab.

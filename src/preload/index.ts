@@ -38,6 +38,7 @@ const api: HermitApi = {
   searchSheets: (projectId, query) => ipcRenderer.invoke('sheets:search', projectId, query),
   exportSheets: (projectId, sheetIds, format) => ipcRenderer.invoke('export', projectId, sheetIds, format),
   showContextMenu: (items, at) => ipcRenderer.invoke('context-menu', items, at),
+  setAppIcon: (dataUrl) => ipcRenderer.send('app:set-icon', dataUrl),
   getSyncState: () => ipcRenderer.invoke('sync:state'),
   updateSyncSettings: (patch) => ipcRenderer.invoke('sync:update-settings', patch),
   connectSync: (url) => ipcRenderer.invoke('sync:connect', url),

@@ -33,25 +33,25 @@ export const SLOTS: { group: string; slots: { key: ColorSlot; label: string }[] 
   }
 ]
 
-/** Mirrors the built-in light and dark values in styles.css. */
+/** Mirrors the built-in light and dark values in styles.css — sand, shell blue and eye navy from the icon. */
 const LIGHT: ThemeColors = {
-  library: '#ecebe8',
-  sheets: '#f6f5f2',
-  editor: '#fdfcfa',
-  text: '#1f1f21',
-  textSoft: '#4a4a4f',
-  textMuted: '#8c8c92',
-  accent: '#0891b2'
+  library: '#ece0cb',
+  sheets: '#f3e9d7',
+  editor: '#faf5ec',
+  text: '#1c2231',
+  textSoft: '#4a4f5c',
+  textMuted: '#8a8274',
+  accent: '#0a6fd6'
 }
 
 const DARK: ThemeColors = {
-  library: '#19191b',
-  sheets: '#1f1f22',
-  editor: '#252528',
-  text: '#e8e8ea',
-  textSoft: '#b8b8bd',
-  textMuted: '#7d7d84',
-  accent: '#22b5d4'
+  library: '#0f1622',
+  sheets: '#131b29',
+  editor: '#172131',
+  text: '#ece4d6',
+  textSoft: '#bcb5a8',
+  textMuted: '#7d8799',
+  accent: '#4ba3f7'
 }
 
 export const PRESETS = {
@@ -112,11 +112,11 @@ export type ThemeId = 'system' | 'custom' | PresetId
 
 /** Rows of ready-made colours offered for every slot: paper tones, mid greys, darks, then accents for each. */
 export const PALETTE: string[][] = [
-  ['#ffffff', '#fdfcfa', '#f7f0df', '#f6f5f2', '#ecebe8', '#e9dfc9', '#f8eeee', '#eef2f7'],
-  ['#d4d4d8', '#b8b8bd', '#a8b2c8', '#8c8c92', '#7d7d84', '#6c7891', '#5e4d3a', '#4a4a4f'],
-  ['#3b2f22', '#2e2226', '#252528', '#242d27', '#1f1f22', '#1a2133', '#19191b', '#0f0f10'],
-  ['#0891b2', '#2563eb', '#7c3aed', '#c4527a', '#dc2626', '#ea580c', '#ca8a04', '#16a34a'],
-  ['#22b5d4', '#7aa2f7', '#c4a7f5', '#f48fb1', '#f87171', '#fb923c', '#facc15', '#8fbf7a']
+  ['#ffffff', '#faf5ec', '#f7f0df', '#f3e9d7', '#ece0cb', '#e9dfc9', '#f8eeee', '#eef2f7'],
+  ['#d4d4d8', '#bcb5a8', '#a8b2c8', '#8a8274', '#7d8799', '#6c7891', '#5e4d3a', '#4a4f5c'],
+  ['#3b2f22', '#2e2226', '#252528', '#242d27', '#172131', '#1a2133', '#0f1622', '#0f0f10'],
+  ['#0a6fd6', '#0891b2', '#7c3aed', '#c4527a', '#dc2626', '#f26b12', '#ca8a04', '#16a34a'],
+  ['#4ba3f7', '#7aa2f7', '#c4a7f5', '#f48fb1', '#f87171', '#ff9a4d', '#facc15', '#8fbf7a']
 ]
 
 export interface ThemeSettings {
@@ -177,10 +177,10 @@ function themeVariables(c: ThemeColors): Record<string, string> {
     '--text-muted': c.textMuted,
     '--md-mark': `color-mix(in srgb, ${c.textMuted} 55%, ${c.editor})`,
     '--accent': c.accent,
-    // Biased towards white so mid-tone accents (like the default teal) keep white labels.
+    // Biased towards white so mid-tone accents (like the default blue) keep white labels.
     '--accent-text': isDark(c.accent, 0.3) ? '#ffffff' : '#0b1a1f',
     '--selection': `color-mix(in srgb, ${c.accent} ${dark ? 25 : 18}%, transparent)`,
-    '--code': dark ? '#e88fb0' : '#9a3a5d',
+    '--code': dark ? '#ff9a4d' : '#b8480a',
     '--search-match': dark ? 'rgba(250, 204, 21, 0.25)' : 'rgba(250, 204, 21, 0.35)',
     '--search-match-active': dark ? 'rgba(250, 160, 21, 0.5)' : 'rgba(250, 160, 21, 0.6)',
     '--syn-keyword': dark ? '#c792ea' : '#8b3fbf',

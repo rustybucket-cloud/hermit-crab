@@ -30,6 +30,7 @@ import { defaultDialect, type GrammarDialect } from './editor/grammar'
 import { formatCount } from './format'
 import { isWithin, otherSection, placeName, samePlace, SECTION_NAMES } from './sections'
 import { sheetPath, syncLabel, timeAgo, useSyncState } from './sync'
+import { useThemedIcon } from './icon'
 import { useTheme } from './theme'
 
 const hermit = window.hermit
@@ -126,6 +127,7 @@ export default function App() {
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [ready, setReady] = useState(false)
   const [theme, setTheme] = useTheme()
+  useThemedIcon(theme)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
   const sync = useSyncState()
