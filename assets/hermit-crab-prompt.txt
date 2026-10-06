@@ -1,0 +1,13 @@
+Generated with the built-in image_gen tool.
+Source: hermit-crab.png (transparent PNG)
+Platform exports: hermit-crab.icns (macOS), hermit-crab.ico (Windows)
+
+Use case: logo-brand
+Asset type: square desktop app icon for Hermit Crab, a calm writing app.
+Primary request: a very simple, friendly hermit crab in orange and blue.
+Subject: bold orange crab with two short eyestalks, two simplified claws and a few short legs, emerging from a single rounded blue shell with one clean spiral curl. Clearly a hermit crab.
+Style: polished flat vector-like graphic, chunky rounded geometric shapes, crisp edges, minimal detail, strong silhouette recognizable at 32 pixels.
+Composition: one centered crab filling about 75 percent of a square canvas, balanced with generous even padding.
+Color palette: vivid warm orange crab, rich medium blue shell, dark navy tiny eyes; only these colors.
+Backdrop: fully transparent background.
+Constraints: no text, no letters, no gradients, no shadows, no texture, no scene, no decorative objects, no thin lines, no border, no app tile behind the crab.
