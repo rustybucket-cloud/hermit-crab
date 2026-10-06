@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'rea
 import { isCanvasId } from '../../../shared/canvas'
 import type { OutlineItem, OutlineTarget, Section, SheetPlace, SheetSummary } from '../../../shared/types'
 import { formatCount, formatDate } from '../format'
-import { depthOf, isWithin, parentSubsection, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
+import { depthOf, isWithin, parentSubsection, placeName, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
 import { CanvasIcon, ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
 import { blankContextMenu, RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
 
@@ -14,11 +14,13 @@ interface Props {
   projectId: string | null
   projectName: string
   section: Section
-  /** How many sheets each section shows, after search. */
-  counts: Record<Section, number>
+  /** Whether the list shows the archive instead of the section. */
+  archiveOpen: boolean
+  /** How many sheets each section and the archive show, after search. */
+  counts: Record<Section | 'archive', number>
   /** The section's outline: sheets and subsection headings in reading order. */
   items: OutlineItem[]
-  /** The section's sheets that match the search. */
+  /** The section's sheets, or the archive's, that match the search. */
   sheets: SheetSummary[]
   totalWords: number
   activeId: string | null
@@ -29,6 +31,9 @@ interface Props {
   renamingSheet: string | null
   onQueryChange(query: string): void
   onSectionChange(section: Section): void
+  onOpenArchive(): void
+  /** Move a sheet or subsection into the archive. */
+  onArchive(item: OutlineItem): void
   onSelect(id: string): void
   onCreate(place?: SheetPlace): void
   /** The new-item menu, shown below the header's add button. */
@@ -91,10 +96,12 @@ function useCollapsed(projectId: string | null, section: Section) {
 export function SheetListPane(props: Props) {
   const { projectId, section, items, sheets, activeId, query } = props
   const [dropAt, setDropAt] = useState<DropAt | null>(null)
-  const [tabDrop, setTabDrop] = useState<Section | null>(null)
+  const [tabDrop, setTabDrop] = useState<Section | 'archive' | null>(null)
   const dragging = useRef<OutlineItem | null>(null)
   const collapsed = useCollapsed(projectId, section)
-  const canReorder = !query
+  const { archiveOpen } = props
+  // The archive is a plain list, most recently archived first.
+  const canReorder = !query && !archiveOpen
   const item = SECTION_NAMES[section].item
   /** Canvases only belong in the notes, so neither they nor subsections holding them can go to the content. */
   const holdsCanvas = (dragged: OutlineItem) =>
@@ -172,24 +179,23 @@ export function SheetListPane(props: Props) {
   const dropClass = (key: string) =>
     dropAt?.row === key ? (dropAt.where === 'into' ? 'drop-target' : `drop-${dropAt.where}`) : null
 
-  const renderSheet = (row: OutlineItem & { kind: 'sheet' }, sheet: SheetSummary) => {
+  /** A sheet in the outline, or without a `row`, one in the archive. */
+  const renderSheet = (sheet: SheetSummary, row: (OutlineItem & { kind: 'sheet' }) | null) => {
     const canvas = isCanvasId(sheet.id)
     const renaming = sheet.id === props.renamingSheet
     return (
       <li
         key={sheet.id}
-        className={['sheet-item', sheet.id === activeId && 'active', dropClass(rowKey(row))].filter(Boolean).join(' ')}
-        style={{ marginLeft: depthOf(sheet.subsection) * INDENT }}
-        draggable={!renaming}
+        className={['sheet-item', sheet.id === activeId && 'active', row && dropClass(rowKey(row))].filter(Boolean).join(' ')}
+        style={{ marginLeft: row ? depthOf(sheet.subsection) * INDENT : 0 }}
+        draggable={Boolean(row) && !renaming}
         onClick={() => props.onSelect(sheet.id)}
-        onDoubleClick={() => canvas && props.onStartRenameSheet(sheet.id)}
+        onDoubleClick={() => row && canvas && props.onStartRenameSheet(sheet.id)}
         onContextMenu={(e) => {
           e.preventDefault()
           props.onContextMenu(sheet.id)
         }}
-        onDragStart={(e) => startDrag(e, row)}
-        onDragEnd={endDrag}
-        {...dragHandlers(row)}
+        {...(row && { onDragStart: (e: DragEvent) => startDrag(e, row), onDragEnd: endDrag, ...dragHandlers(row) })}
       >
         <div className={`sheet-title${sheet.title ? '' : ' untitled'}`}>
           {canvas && <CanvasIcon className="sheet-kind" />}
@@ -205,6 +211,7 @@ export function SheetListPane(props: Props) {
         </div>
         {sheet.excerpt && <div className="sheet-excerpt">{sheet.excerpt}</div>}
         <div className="sheet-meta">
+          {sheet.archived && `${placeName(sheet)} · `}
           {formatDate(sheet.updatedAt)} · {formatCount(sheet.wordCount, 'word')}
         </div>
       </li>
@@ -278,24 +285,27 @@ export function SheetListPane(props: Props) {
     return nodes
   }
 
-  const rows = items.flatMap((row, i): ReactNode[] => {
-    if (!query && collapsed.isHidden(parentOf(row))) return []
-    if (row.kind === 'sheet') {
-      const sheet = visible.get(row.id)
-      return sheet ? [renderSheet(row, sheet)] : []
-    }
-    if (query && !sheets.some((s) => isWithin(s.subsection, row.subsection))) return []
-    const next = items[i + 1]
-    const empty = !next || !isWithin(parentOf(next), row.subsection)
-    return renderSubsection(row, empty)
-  })
+  const outlineRows = () =>
+    items.flatMap((row, i): ReactNode[] => {
+      if (!query && collapsed.isHidden(parentOf(row))) return []
+      if (row.kind === 'sheet') {
+        const sheet = visible.get(row.id)
+        return sheet ? [renderSheet(sheet, row)] : []
+      }
+      if (query && !sheets.some((s) => isWithin(s.subsection, row.subsection))) return []
+      const next = items[i + 1]
+      const empty = !next || !isWithin(parentOf(next), row.subsection)
+      return renderSubsection(row, empty)
+    })
 
-  const empty = query ? sheets.length === 0 : items.length === 0
+  const rows = archiveOpen ? sheets.map((sheet) => renderSheet(sheet, null)) : outlineRows()
+
+  const empty = query || archiveOpen ? sheets.length === 0 : items.length === 0
 
   return (
     <section
       className="pane sheets"
-      onContextMenu={projectId ? blankContextMenu(() => props.onSectionMenu(section)) : undefined}
+      onContextMenu={projectId && !archiveOpen ? blankContextMenu(() => props.onSectionMenu(section)) : undefined}
     >
       <header className="pane-header">
         <div className="pane-title">
@@ -332,8 +342,10 @@ export function SheetListPane(props: Props) {
             <button
               key={s}
               role="tab"
-              aria-selected={s === section}
-              className={['section-tab', s === section && 'active', s === tabDrop && 'drop-target'].filter(Boolean).join(' ')}
+              aria-selected={s === section && !archiveOpen}
+              className={['section-tab', s === section && !archiveOpen && 'active', s === tabDrop && 'drop-target']
+                .filter(Boolean)
+                .join(' ')}
               onClick={() => props.onSectionChange(s)}
               onContextMenu={(e) => {
                 e.preventDefault()
@@ -360,6 +372,33 @@ export function SheetListPane(props: Props) {
               <span className="section-count">{props.counts[s]}</span>
             </button>
           ))}
+          <button
+            role="tab"
+            aria-selected={archiveOpen}
+            className={['section-tab', archiveOpen && 'active', tabDrop === 'archive' && 'drop-target']
+              .filter(Boolean)
+              .join(' ')}
+            onClick={props.onOpenArchive}
+            title="Archived sheets and notes"
+            // Drop a sheet or subsection here to archive it.
+            onDragOver={(e) => {
+              if (!dragging.current) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setTabDrop('archive')
+            }}
+            onDragLeave={() => setTabDrop((t) => (t === 'archive' ? null : t))}
+            onDrop={(e) => {
+              const dragged = dragging.current
+              setTabDrop(null)
+              if (!dragged) return
+              e.preventDefault()
+              props.onArchive(dragged)
+            }}
+          >
+            Archive
+            <span className="section-count">{props.counts.archive}</span>
+          </button>
         </div>
       )}
 
@@ -368,7 +407,7 @@ export function SheetListPane(props: Props) {
           <SearchIcon />
           <input
             type="search"
-            placeholder={`Search ${SECTION_NAMES[section].label.toLowerCase()}`}
+            placeholder={`Search ${archiveOpen ? 'archive' : SECTION_NAMES[section].label.toLowerCase()}`}
             value={query}
             onChange={(e) => props.onQueryChange(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && props.onQueryChange('')}
@@ -399,7 +438,9 @@ export function SheetListPane(props: Props) {
       {projectId && empty && (
         <div className="empty-hint">
           {query ? (
-            `No matching ${item.toLowerCase()}s`
+            `No matching ${archiveOpen ? 'sheets or notes' : `${item.toLowerCase()}s`}`
+          ) : archiveOpen ? (
+            <p>Sheets and notes you archive wait here, out of the way, until you restore them.</p>
           ) : (
             <>
               {section === 'notes' && <p>Plans, outlines, research — anything that supports the content.</p>}

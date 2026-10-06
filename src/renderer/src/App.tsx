@@ -98,6 +98,12 @@ interface Stats {
   canvas?: string
 }
 
+/** The project to fall back on: the first that isn't archived. */
+const firstActive = (list: ProjectSummary[]) => list.find((p) => !p.archived)?.id ?? null
+
+/** Where a sheet is listed: its section, or the archive. Switching back to one returns to the sheet last open there. */
+const viewKey = (projectId: string, sheet: SheetSummary) => `${projectId}:${sheet.archived ? 'archive' : sheet.section}`
+
 function statsOf(sheetId: string, text: string): Stats {
   if (!isCanvasId(sheetId)) return { words: countWords(text), chars: text.length }
   const { excerpt, wordCount } = summarizeCanvas(text)
@@ -111,6 +117,10 @@ export default function App() {
   // Every sheet in the project, both sections; the list shows the active section's.
   const [sheets, setSheets] = useState<SheetSummary[]>([])
   const [section, setSection] = useState<Section>('content')
+  // Archived sheets of both sections, most recently archived first.
+  const [archived, setArchived] = useState<SheetSummary[]>([])
+  // Whether the sheet list shows the archive instead of the section.
+  const [archiveOpen, setArchiveOpen] = useState(false)
   // Sheets and subsections of both sections, in reading order.
   const [outline, setOutline] = useState<OutlineItem[]>([])
   // Path of the subsection being named, in the active section.
@@ -143,7 +153,7 @@ export default function App() {
   const saveTimer = useRef<number | undefined>(undefined)
   const statsTimer = useRef<number | undefined>(undefined)
   const loadSeq = useRef(0)
-  // The sheet last open in each project section, so switching sections returns to it.
+  // The sheet last open in each project section and archive, so switching back returns to it.
   const lastInSection = useRef(new Map<string, string>())
 
   useEffect(() => localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)), [prefs])
@@ -158,7 +168,9 @@ export default function App() {
     setSaveState('saving')
     try {
       const summary = await hermit.writeSheet(job.projectId, job.sheetId, job.doc.toString())
-      setSheets((prev) => prev.map((s) => (s.id === summary.id ? summary : s)))
+      const replace = (prev: SheetSummary[]) => prev.map((s) => (s.id === summary.id ? summary : s))
+      if (summary.archived) setArchived(replace)
+      else setSheets(replace)
       setSaveState(pending.current ? 'unsaved' : 'saved')
     } catch (err) {
       console.error('Save failed', err)
@@ -208,10 +220,11 @@ export default function App() {
   }, [])
 
   const refreshSheets = useCallback(async (pid: string) => {
-    const { sheets: list, items } = await hermit.listOutline(pid)
-    setSheets(list)
-    setOutline(items)
-    return list
+    const result = await hermit.listOutline(pid)
+    setSheets(result.sheets)
+    setOutline(result.items)
+    setArchived(result.archived)
+    return result
   }, [])
 
   const openSheet = useCallback(
@@ -227,8 +240,9 @@ export default function App() {
       liveDoc.current = sheet.content
       setStats(statsOf(sheet.id, sheet.content))
       setCurrent({ projectId: pid, sheet, key: `${pid}/${sheetId}#${seq}` })
-      setSection(sheet.section)
-      lastInSection.current.set(`${pid}:${sheet.section}`, sheetId)
+      setArchiveOpen(sheet.archived)
+      if (!sheet.archived) setSection(sheet.section)
+      lastInSection.current.set(viewKey(pid, sheet), sheetId)
       localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId }))
     },
     [flush]
@@ -239,13 +253,16 @@ export default function App() {
       await flush()
       setProjectId(pid)
       setQuery('')
+      setArchiveOpen(false)
       if (!pid) {
         setSheets([])
+        setArchived([])
         await openSheet('', null)
         return
       }
-      const list = await refreshSheets(pid)
-      const target = list.find((s) => s.id === preferredSheet) ?? list.find((s) => s.section === 'content')
+      const { sheets: list, archived: archivedList } = await refreshSheets(pid)
+      const target =
+        [...list, ...archivedList].find((s) => s.id === preferredSheet) ?? list.find((s) => s.section === 'content')
       setSection(target?.section ?? 'content')
       await openSheet(pid, target?.id ?? null)
     },
@@ -255,8 +272,7 @@ export default function App() {
   const init = useCallback(async () => {
     const list = await refreshProjects()
     const last = loadJson<{ projectId?: string; sheetId?: string }>(LAST_KEY, {})
-    const project = list.find((p) => p.id === last.projectId) ?? list[0]
-    await openProject(project?.id ?? null, last.sheetId)
+    await openProject(list.find((p) => p.id === last.projectId)?.id ?? firstActive(list), last.sheetId)
     setReady(true)
   }, [openProject, refreshProjects])
 
@@ -270,18 +286,19 @@ export default function App() {
   const handleSyncChanged = async (paths: string[]) => {
     const list = await refreshProjects()
     if (!projectId || !list.some((p) => p.id === projectId)) {
-      await openProject(list[0]?.id ?? null)
+      await openProject(firstActive(list))
       return
     }
-    const sheetList = await refreshSheets(projectId)
+    const { sheets: sheetList, archived: archivedList } = await refreshSheets(projectId)
     if (!current || current.projectId !== projectId) return
     const id = current.sheet.id
     if (!paths.includes(sheetPath(projectId, id))) return
 
     // Anything typed in the moment since sync saved this sheet would overwrite what was just pulled.
     discardPending((p) => p.projectId === projectId && p.sheetId === id)
-    if (!sheetList.some((s) => s.id === id)) {
-      await openSheet(projectId, sheetList.find((s) => s.section === section)?.id ?? null)
+    if (![...sheetList, ...archivedList].some((s) => s.id === id)) {
+      const fallback = archiveOpen ? archivedList[0] : sheetList.find((s) => s.section === section)
+      await openSheet(projectId, fallback?.id ?? null)
       return
     }
     const sheet = await hermit.readSheet(projectId, id)
@@ -331,17 +348,28 @@ export default function App() {
     () => (matches ? sheets.filter((s) => matches.has(s.id)) : sheets),
     [sheets, matches]
   )
-  const visibleSheets = useMemo(() => matchingSheets.filter((s) => s.section === section), [matchingSheets, section])
+  const matchingArchived = useMemo(
+    () => (matches ? archived.filter((s) => matches.has(s.id)) : archived),
+    [archived, matches]
+  )
+  // The list shows the section's sheets, or the archive's.
+  const visibleSheets = useMemo(
+    () => (archiveOpen ? matchingArchived : matchingSheets.filter((s) => s.section === section)),
+    [archiveOpen, matchingArchived, matchingSheets, section]
+  )
   const sectionOutline = useMemo(() => outline.filter((i) => i.section === section), [outline, section])
   const sectionCounts = {
     content: matchingSheets.filter((s) => s.section === 'content').length,
-    notes: matchingSheets.filter((s) => s.section === 'notes').length
+    notes: matchingSheets.filter((s) => s.section === 'notes').length,
+    archive: matchingArchived.length
   }
+  // Both sections and the archive, for finding a neighbour once a sheet leaves its list.
+  const everySheet = [...sheets, ...archived]
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  /** New projects go in the same folder as the open one. */
-  const createProject = async (folder = projects.find((p) => p.id === projectId)?.folder ?? null) => {
+  /** New projects go in the same folder as the open one, unless that one's archived. */
+  const createProject = async (folder = projects.find((p) => p.id === projectId && !p.archived)?.folder ?? null) => {
     await flush()
     const project = await hermit.createProject('Untitled Project', folder)
     await refreshProjects()
@@ -398,7 +426,7 @@ export default function App() {
     const inside = (id: string) => id.startsWith(`${folder}/`)
     discardPending((p) => inside(p.projectId))
     const list = await refreshProjects()
-    if (projectId && inside(projectId)) await openProject(list[0]?.id ?? null)
+    if (projectId && inside(projectId)) await openProject(firstActive(list))
   }
 
   /** Move a project or folder into a folder, or to the top of the library with null. */
@@ -417,7 +445,31 @@ export default function App() {
     if (!(await hermit.deleteProject(id))) return
     discardPending((p) => p.projectId === id)
     const list = await refreshProjects()
-    if (projectId === id) await openProject(list[0]?.id ?? null)
+    if (projectId === id) await openProject(firstActive(list))
+  }
+
+  /** Archiving the open project moves on to another, as moving it to the Trash does. */
+  const archiveProject = async (id: string) => {
+    await flush()
+    try {
+      await hermit.archiveProject(id)
+    } catch (err) {
+      console.error('Archive failed', err)
+      return
+    }
+    discardPending((p) => p.projectId === id)
+    const list = await refreshProjects()
+    if (projectId === id) await openProject(firstActive(list))
+  }
+
+  const restoreProject = async (id: string) => {
+    await flush()
+    try {
+      projectsMoved(id, await hermit.restoreProject(id))
+    } catch (err) {
+      console.error('Restore failed', err)
+    }
+    await refreshProjects()
   }
 
   /** New sheets go after the open one, or at the end of `place` when given. */
@@ -431,7 +483,8 @@ export default function App() {
     }
     await flush()
     setQuery('')
-    const here = current?.projectId === pid && current.sheet.section === section ? current.sheet : null
+    const here =
+      current?.projectId === pid && !current.sheet.archived && current.sheet.section === section ? current.sheet : null
     const target = place ?? { section, subsection: here?.subsection ?? null }
     const afterId = here && samePlace(here, target) ? here.id : undefined
     const sheet = await hermit.createSheet(pid, content, afterId, target)
@@ -445,7 +498,7 @@ export default function App() {
     const pid = projectId
     await flush()
     setQuery('')
-    const here = current?.projectId === pid && current.sheet.section === 'notes' ? current.sheet : null
+    const here = current?.projectId === pid && !current.sheet.archived && current.sheet.section === 'notes' ? current.sheet : null
     const target = place ?? { section: 'notes' as const, subsection: here?.subsection ?? null }
     const afterId = here && samePlace(here, target) ? here.id : undefined
     const canvas = await hermit.createCanvas(pid, target, 'Untitled Canvas', undefined, afterId)
@@ -463,7 +516,7 @@ export default function App() {
     try {
       const renamed = await hermit.renameCanvas(pid, id, name)
       discardPending((p) => p.projectId === pid && p.sheetId in renamed)
-      await retarget(pid, renamed, await refreshSheets(pid))
+      await retarget(pid, renamed, (await refreshSheets(pid)).sheets)
     } catch (err) {
       console.error('Rename failed', err)
     }
@@ -480,14 +533,15 @@ export default function App() {
     await openSheet(projectId, copy.id)
   }
 
-  /** After a sheet leaves the list, select its neighbour in the same section. */
-  const selectNeighbour = async (pid: string, removedId: string, before: SheetSummary[]) => {
-    const list = await refreshSheets(pid)
+  /** After sheets leave the list, if the open one went, select its neighbour in the same section or archive. */
+  const selectNeighbour = async (pid: string, removedIds: string[], before: SheetSummary[]) => {
+    const { sheets: list, archived: archivedList } = await refreshSheets(pid)
     await refreshProjects()
-    if (current?.sheet.id !== removedId) return
-    const inSection = (l: SheetSummary[]) => l.filter((s) => s.section === current.sheet.section)
-    const index = inSection(before).findIndex((s) => s.id === removedId)
-    const remaining = inSection(list)
+    if (!current || !removedIds.includes(current.sheet.id)) return
+    const from = current.sheet
+    const sameList = (s: SheetSummary) => s.archived === from.archived && (from.archived || s.section === from.section)
+    const index = before.filter(sameList).findIndex((s) => s.id === from.id)
+    const remaining = [...list, ...archivedList].filter(sameList)
     const next = remaining[Math.min(index, remaining.length - 1)]
     await openSheet(pid, next?.id ?? null)
   }
@@ -497,15 +551,51 @@ export default function App() {
     await flush()
     if (!(await hermit.deleteSheet(projectId, id))) return
     discardPending((p) => p.sheetId === id)
-    await selectNeighbour(projectId, id, sheets)
+    await selectNeighbour(projectId, [id], everySheet)
   }
 
   const moveSheet = async (sheetId: string, from: string, to: string) => {
     await flush()
     discardPending((p) => p.sheetId === sheetId)
     await hermit.moveSheet(from, sheetId, to)
-    if (from === projectId) await selectNeighbour(from, sheetId, sheets)
+    if (from === projectId) await selectNeighbour(from, [sheetId], everySheet)
     else await refreshProjects()
+  }
+
+  /** Move a sheet, or a subsection and everything in it, into the archive. */
+  const archiveItem = async (item: OutlineItem) => {
+    if (!projectId) return
+    const pid = projectId
+    await flush()
+    try {
+      const renamed = await hermit.archiveInOutline(pid, item)
+      discardPending((p) => p.projectId === pid && p.sheetId in renamed)
+      await selectNeighbour(pid, Object.keys(renamed), everySheet)
+    } catch (err) {
+      console.error('Archive failed', err)
+    }
+  }
+
+  /** Put an archived sheet back where it came from. If it's the one open, follow it there. */
+  const restoreSheet = async (id: string) => {
+    if (!projectId) return
+    const pid = projectId
+    await flush()
+    let renamed: Record<string, string>
+    try {
+      renamed = await hermit.restoreSheet(pid, id)
+    } catch (err) {
+      console.error('Restore failed', err)
+      return
+    }
+    discardPending((p) => p.projectId === pid && p.sheetId in renamed)
+    const { sheets: list } = await refreshSheets(pid)
+    await refreshProjects()
+    const restored = list.find((s) => s.id === renamed[id])
+    if (current?.projectId !== pid || current.sheet.id !== id || !restored) return
+    await retarget(pid, renamed, list)
+    setArchiveOpen(false)
+    setSection(restored.section)
   }
 
   /** The open sheet's file moved; keep editing it under its new id without reloading. */
@@ -516,15 +606,15 @@ export default function App() {
       // Moving sheets rewrites the links on canvases that show them, so the open canvas reloads.
       const sheet = await hermit.readSheet(pid, openId)
       setCurrent({ projectId: pid, sheet, key: `${pid}/${openId}#${++loadSeq.current}` })
-      lastInSection.current.set(`${pid}:${sheet.section}`, openId)
+      lastInSection.current.set(viewKey(pid, sheet), openId)
       localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId: openId }))
       return
     }
     const moved = list.find((s) => s.id === renamed[current.sheet.id])
     if (!moved) return
-    const { id, section: movedTo, subsection } = moved
-    setCurrent({ ...current, sheet: { ...current.sheet, id, section: movedTo, subsection } })
-    lastInSection.current.set(`${pid}:${movedTo}`, id)
+    const { id, section: movedTo, subsection, archived: isArchived } = moved
+    setCurrent({ ...current, sheet: { ...current.sheet, id, section: movedTo, subsection, archived: isArchived } })
+    lastInSection.current.set(viewKey(pid, moved), id)
     localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId: id }))
   }
 
@@ -544,11 +634,11 @@ export default function App() {
     discardPending((p) => p.projectId === pid && p.sheetId in renamed)
     const toSection = 'into' in target ? target.into.section : ('before' in target ? target.before : target.after).section
     if (item.kind === 'sheet' && toSection !== item.section) {
-      await selectNeighbour(pid, item.id, sheets)
+      await selectNeighbour(pid, [item.id], everySheet)
       if (current?.sheet.id !== item.id) await retarget(pid, renamed, [])
       return
     }
-    await retarget(pid, renamed, await refreshSheets(pid))
+    await retarget(pid, renamed, (await refreshSheets(pid)).sheets)
   }
 
   const createSubsection = async (parent: SheetPlace = { section, subsection: null }) => {
@@ -565,7 +655,7 @@ export default function App() {
     await flush()
     const renamed = await hermit.renameSubsection(pid, place, name)
     discardPending((p) => p.projectId === pid && p.sheetId in renamed)
-    await retarget(pid, renamed, await refreshSheets(pid))
+    await retarget(pid, renamed, (await refreshSheets(pid)).sheets)
   }
 
   const deleteSubsection = async (place: SheetPlace) => {
@@ -577,17 +667,27 @@ export default function App() {
       current.sheet.section === place.section &&
       isWithin(current.sheet.subsection, place.subsection)
     if (wasOpen) discardPending((p) => p.projectId === projectId && p.sheetId === current.sheet.id)
-    const list = await refreshSheets(projectId)
+    const { sheets: list } = await refreshSheets(projectId)
     if (wasOpen) await openSheet(projectId, list.find((s) => s.section === place.section)?.id ?? null)
   }
 
-  /** Show the other section, picking up where you left off in it. */
+  /** Show a section, picking up where you left off in it. */
   const switchSection = async (to: Section) => {
-    if (!projectId || to === section) return
+    if (!projectId || (to === section && !archiveOpen)) return
+    setArchiveOpen(false)
     setSection(to)
     const inSection = sheets.filter((s) => s.section === to)
     const last = lastInSection.current.get(`${projectId}:${to}`)
     const target = inSection.find((s) => s.id === last) ?? inSection[0]
+    await openSheet(projectId, target?.id ?? null)
+  }
+
+  /** Show the archive, picking up where you left off in it. */
+  const openArchive = async () => {
+    if (!projectId || archiveOpen) return
+    setArchiveOpen(true)
+    const last = lastInSection.current.get(`${projectId}:archive`)
+    const target = archived.find((s) => s.id === last) ?? archived[0]
     await openSheet(projectId, target?.id ?? null)
   }
 
@@ -630,25 +730,47 @@ export default function App() {
   }
 
   const showProjectMenu = async (id: string) => {
+    const inArchive = projects.find((p) => p.id === id)?.archived
     const choice = await hermit.showContextMenu([
-      { id: 'rename', label: 'Rename' },
+      inArchive ? { id: 'restore', label: 'Restore from Archive' } : { id: 'rename', label: 'Rename' },
       { id: 'reveal', label: 'Show in Finder' },
       { id: 'settings', label: 'Project Settings…' },
       { type: 'separator' },
       ...exportItems(formatOf(id)),
       { type: 'separator' },
+      ...(inArchive ? [] : [{ id: 'archive', label: 'Archive' }]),
       { id: 'delete', label: 'Move to Trash…' }
     ])
     if (choice === 'rename') setRenamingProject(id)
+    else if (choice === 'archive') void archiveProject(id)
+    else if (choice === 'restore') void restoreProject(id)
     else if (choice === 'settings') setProjectSettingsFor(id)
     else if (choice === 'reveal') void hermit.revealProject(id)
     else if (choice === 'delete') void deleteProject(id)
     else if (choice?.startsWith('export-')) void exportSheets(id, null, choice.slice(7) as ExportFormat)
   }
 
+  const showArchivedMenu = async (sheet: SheetSummary) => {
+    if (!projectId) return
+    const canvas = isCanvasId(sheet.id)
+    const choice = await hermit.showContextMenu([
+      { id: 'restore', label: `Restore to ${placeName(sheet)}` },
+      ...(canvas
+        ? []
+        : [{ type: 'separator' as const }, ...exportItems(sheet.section === 'content' ? formatOf(projectId) : 'markdown')]),
+      { type: 'separator' },
+      { id: 'delete', label: 'Move to Trash…' }
+    ])
+    if (choice === 'restore') void restoreSheet(sheet.id)
+    else if (choice === 'delete') void deleteSheet(sheet.id)
+    else if (choice?.startsWith('export-')) void exportSheets(projectId, [sheet.id], choice.slice(7) as ExportFormat)
+  }
+
   const showSheetMenu = async (id: string) => {
     if (!projectId) return
-    const others = projects.filter((p) => p.id !== projectId)
+    const archivedSheet = archived.find((s) => s.id === id)
+    if (archivedSheet) return showArchivedMenu(archivedSheet)
+    const others = projects.filter((p) => p.id !== projectId && !p.archived)
     const sheet = sheets.find((s) => s.id === id)
     // Every section and subsection, in outline order.
     const allPlaces: SheetPlace[] = (['content', 'notes'] as const).flatMap((s) => [
@@ -672,14 +794,14 @@ export default function App() {
           ]
         : []),
       { type: 'separator' },
+      { id: 'archive', label: 'Archive' },
       { id: 'delete', label: 'Move to Trash…' }
     ])
+    const item: OutlineItem | null = sheet ? { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection } : null
     if (choice === 'rename') setRenamingSheet(id)
     else if (choice === 'duplicate') void duplicateSheet(id)
-    else if (choice?.startsWith('place:') && sheet) {
-      const item: OutlineItem = { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection }
-      void moveItem(item, { into: places[Number(choice.slice(6))] })
-    }
+    else if (choice?.startsWith('place:') && item) void moveItem(item, { into: places[Number(choice.slice(6))] })
+    else if (choice === 'archive' && item) void archiveItem(item)
     else if (choice === 'delete') void deleteSheet(id)
     else if (choice?.startsWith('export-')) void exportSheets(projectId, [id], choice.slice(7) as ExportFormat)
     else if (choice?.startsWith('move:')) void moveSheet(id, projectId, choice.slice(5))
@@ -760,12 +882,16 @@ export default function App() {
       { id: 'new-subsection', label: 'New Subsection' },
       { id: 'rename', label: 'Rename' },
       { type: 'separator' },
+      { id: 'archive', label: 'Archive' },
       { id: 'delete', label: 'Move to Trash…' }
     ])
     if (choice === 'new') void createSheet('', place)
     else if (choice === 'new-canvas') void createCanvas(place)
     else if (choice === 'new-subsection') void createSubsection(place)
     else if (choice === 'rename') setRenamingSubsection(place.subsection)
+    else if (choice === 'archive' && place.subsection) {
+      void archiveItem({ kind: 'subsection', section: place.section, subsection: place.subsection })
+    }
     else if (choice === 'delete') void deleteSubsection(place)
   }
 
@@ -842,7 +968,7 @@ export default function App() {
       case 'toggle-library': return togglePref('showLibrary')
       case 'toggle-sheets': return togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
-      case 'toggle-section': return void switchSection(otherSection(section))
+      case 'toggle-section': return void switchSection(archiveOpen ? section : otherSection(section))
       case 'toggle-preview': return current && !onCanvas && togglePref('preview')
       case 'toggle-focus': return toggleFocus()
       case 'toggle-typewriter': return togglePref('typewriter')
@@ -884,7 +1010,10 @@ export default function App() {
 
   const project = projects.find((p) => p.id === projectId)
   const settingsProject = projects.find((p) => p.id === projectSettingsFor)
-  const totalWords = sheets.filter((s) => s.section === section).reduce((sum, s) => sum + s.wordCount, 0)
+  const totalWords = (archiveOpen ? archived : sheets.filter((s) => s.section === section)).reduce(
+    (sum, s) => sum + s.wordCount,
+    0
+  )
   const previewSource = prefs.preview && current ? liveDoc.current.toString() : ''
   const shortcutModifier = hermit.platform === 'darwin' ? '⌘' : 'Ctrl+'
 
@@ -897,7 +1026,8 @@ export default function App() {
     <div className={`app platform-${hermit.platform}`} style={style}>
       {prefs.showLibrary && (
         <LibraryPane
-          projects={projects}
+          projects={projects.filter((p) => !p.archived)}
+          archived={projects.filter((p) => p.archived)}
           folders={folders}
           activeId={projectId}
           renamingId={renamingProject}
@@ -918,6 +1048,7 @@ export default function App() {
           onLibraryMenu={() => void showLibraryMenu()}
           onDropSheet={(sheetId, from, to) => void moveSheet(sheetId, from, to)}
           onMove={(libraryPath, folder) => void moveInLibrary(libraryPath, folder)}
+          onArchive={(id) => void archiveProject(id)}
         />
       )}
 
@@ -926,6 +1057,7 @@ export default function App() {
           projectId={projectId}
           projectName={project?.name ?? 'No Project'}
           section={section}
+          archiveOpen={archiveOpen}
           counts={sectionCounts}
           sheets={visibleSheets}
           items={sectionOutline}
@@ -936,6 +1068,8 @@ export default function App() {
           query={query}
           onQueryChange={setQuery}
           onSectionChange={(s) => void switchSection(s)}
+          onOpenArchive={() => void openArchive()}
+          onArchive={(item) => void archiveItem(item)}
           onSelect={(id) => projectId && id !== current?.sheet.id && void openSheet(projectId, id)}
           onCreate={(place) => void createSheet('', place)}
           onNewMenu={(at) => void showNewMenu(at)}
@@ -1008,6 +1142,15 @@ export default function App() {
           </div>
         </header>
 
+        {current?.sheet.archived && (
+          <div className="archive-banner">
+            <span>Archived from {placeName(current.sheet)}.</span>
+            <button className="ghost-button" onClick={() => void restoreSheet(current.sheet.id)}>
+              Restore
+            </button>
+          </div>
+        )}
+
         {conflicted && (
           <div className="conflict-banner">
             <span>This sheet changed here and on GitHub. It’s read-only until the conflict is resolved.</span>
@@ -1068,6 +1211,8 @@ export default function App() {
                       <PlusIcon /> New Project
                     </button>
                   </>
+                ) : archiveOpen ? (
+                  <p>Nothing from the archive is open.</p>
                 ) : (
                   <>
                     <p>{section === 'notes' ? 'No note selected.' : 'No sheet selected.'}</p>

@@ -5,10 +5,13 @@ import { ChevronIcon, FolderIcon, GearIcon, PlusIcon } from './Icons'
 export const SHEET_DRAG_TYPE = 'application/x-hermit-sheet'
 const LIBRARY_DRAG_TYPE = 'application/x-hermit-library-item'
 const COLLAPSED_KEY = 'hermit:collapsed-folders'
+const ARCHIVE_OPEN_KEY = 'hermit:archive-open'
 const INDENT = 14
 
 interface Props {
   projects: ProjectSummary[]
+  /** Projects in the archive, sorted by name. */
+  archived: ProjectSummary[]
   /** Folders of projects, by path within the library. */
   folders: string[]
   activeId: string | null
@@ -30,6 +33,8 @@ interface Props {
   onDropSheet(sheetId: string, fromProject: string, toProject: string): void
   /** Move a project or folder into a folder, or to the top of the library with null. */
   onMove(libraryPath: string, folder: string | null): void
+  /** Move a project into the archive. */
+  onArchive(projectId: string): void
 }
 
 const folderName = (folder: string) => folder.slice(folder.lastIndexOf('/') + 1)
@@ -67,16 +72,48 @@ function useCollapsedFolders() {
 }
 
 export function LibraryPane(props: Props) {
-  const { projects, folders, activeId, renamingId, renamingFolder } = props
+  const { projects, archived, folders, activeId, renamingId, renamingFolder } = props
   // A project a sheet is over, a folder, or '' for the top of the library.
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  // Whether a project being dragged is over the archive.
+  const [archiveDrop, setArchiveDrop] = useState(false)
   const dragging = useRef<string | null>(null)
   const collapsed = useCollapsedFolders()
+  const [archiveOpen, setArchiveOpen] = useState(() => localStorage.getItem(ARCHIVE_OPEN_KEY) === 'true')
+  useEffect(() => localStorage.setItem(ARCHIVE_OPEN_KEY, String(archiveOpen)), [archiveOpen])
 
-  // Never hide the open project, or a folder being named, inside a collapsed folder.
+  // Never hide the open project, or a folder being named, inside a collapsed folder or the archive.
   const activeFolder = activeId ? parentFolder(activeId) : null
   useEffect(() => collapsed.reveal(activeFolder), [activeFolder])
   useEffect(() => collapsed.reveal(renamingFolder && parentFolder(renamingFolder)), [renamingFolder])
+  const activeArchived = archived.some((p) => p.id === activeId)
+  useEffect(() => {
+    if (activeArchived) setArchiveOpen(true)
+  }, [activeArchived])
+
+  /** Drag handlers for the archive, which takes projects but not folders. */
+  const isProject = (libraryPath: string | null) => projects.some((p) => p.id === libraryPath)
+  const archiveDropHandlers = {
+    onDragOver: (e: DragEvent) => {
+      // Stop here either way, so the list behind doesn't take it as a move to the top of the library.
+      e.stopPropagation()
+      if (!isProject(dragging.current)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      setArchiveDrop(true)
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setArchiveDrop(false)
+    },
+    onDrop: (e: DragEvent) => {
+      const dragged = dragging.current
+      setArchiveDrop(false)
+      if (!dragged || !isProject(dragged)) return
+      e.preventDefault()
+      e.stopPropagation()
+      props.onArchive(dragged)
+    }
+  }
 
   /** Drag handlers for a place a project or folder can be dropped into. */
   const folderDrop = (folder: string | null) => ({
@@ -107,6 +144,7 @@ export function LibraryPane(props: Props) {
   const endDrag = () => {
     dragging.current = null
     setDropTarget(null)
+    setArchiveDrop(false)
   }
 
   const renderProject = (p: ProjectSummary, depth: number) => (
@@ -212,6 +250,24 @@ export function LibraryPane(props: Props) {
     ]
   }
 
+  /** An archived project, by name, with the folder it came from in its tooltip. */
+  const renderArchived = (p: ProjectSummary) => (
+    <div
+      key={p.id}
+      className={`project-item archived${p.id === activeId ? ' active' : ''}`}
+      title={p.folder ? `From ${p.folder.split('/').join(' › ')}` : undefined}
+      onClick={() => props.onSelect(p.id)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        props.onContextMenu(p.id)
+      }}
+    >
+      <FolderIcon className="project-icon" />
+      <span className="project-name">{p.name}</span>
+      <span className="project-count">{p.sheetCount}</span>
+    </div>
+  )
+
   /** Folders first, then projects; both lists arrive sorted by name. */
   const renderLevel = (folder: string | null, depth: number): ReactNode[] => [
     ...folders.filter((f) => parentFolder(f) === folder).flatMap((f) => renderFolder(f, depth)),
@@ -229,6 +285,20 @@ export function LibraryPane(props: Props) {
         {...folderDrop(null)}
       >
         {renderLevel(null, 0)}
+        {archived.length > 0 && (
+          <div className={`library-archive${archiveDrop ? ' drop-target' : ''}`} {...archiveDropHandlers}>
+            <div
+              className={`library-archive-label${archiveOpen ? ' open' : ''}`}
+              onClick={() => setArchiveOpen(!archiveOpen)}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <ChevronIcon className="library-folder-chevron" />
+              <span className="library-folder-name">Archive</span>
+              <span className="project-count">{archived.length}</span>
+            </div>
+            {archiveOpen && archived.map(renderArchived)}
+          </div>
+        )}
       </nav>
       <footer className="library-footer">
         <button

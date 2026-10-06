@@ -3,8 +3,13 @@ export interface ProjectSummary {
   id: string
   /** The last part of the path. */
   name: string
-  /** Path of the folder of projects it's in, or null at the top of the library. */
+  /**
+   * Path of the folder of projects it's in, or null at the top of the library.
+   * For an archived project, the folder it goes back to when restored.
+   */
   folder: string | null
+  /** Archived projects live in the library's archive folder, out of the way: `.archive/Fiction/My Novel`. */
+  archived: boolean
   /** Counts cover the content only. */
   sheetCount: number
   wordCount: number
@@ -35,8 +40,11 @@ export interface SheetSummary extends SheetPlace {
    * Path within the project without the `.md` extension, such as `<name>` or `Part One/<name>`.
    * Notes live in a `Notes` folder, so their ids are `Notes/<name>`, or `Notes/Characters/<name>`.
    * Canvases, which are always notes, keep their extension: `Notes/<name>.canvas`.
+   * Archived sheets keep their path inside the project's hidden `.archive` folder: `.archive/Notes/<name>`.
    */
   id: string
+  /** Whether it's in the archive. Its section and subsection are then where it came from. */
+  archived: boolean
   title: string
   excerpt: string
   wordCount: number
@@ -61,6 +69,8 @@ export interface Outline {
   sheets: SheetSummary[]
   /** Sheets and subsections in reading order; each subsection's heading comes before what's in it. */
   items: OutlineItem[]
+  /** Archived sheets and notes, most recently archived first. */
+  archived: SheetSummary[]
 }
 
 /** `md` and `fountain` save the text as written; which one fits depends on the project. */
@@ -163,6 +173,10 @@ export interface HermitApi {
   createProject(name: string, folder?: string | null): Promise<ProjectSummary>
   renameProject(projectId: string, name: string): Promise<ProjectSummary>
   deleteProject(projectId: string): Promise<boolean>
+  /** Move a project into the library's archive. Resolves with its new path. */
+  archiveProject(projectId: string): Promise<string>
+  /** Put an archived project back in the folder it came from. Resolves with its new path. */
+  restoreProject(projectId: string): Promise<string>
   revealProject(projectId: string): Promise<void>
   updateProjectSettings(projectId: string, patch: Partial<ProjectSettings>): Promise<ProjectSummary>
   /** Folders of projects, by path within the library, such as `Fiction` and `Fiction/Novels`. */
@@ -193,6 +207,10 @@ export interface HermitApi {
   /** Resolves with the sheet ids that changed, old to new. */
   renameSubsection(projectId: string, place: SheetPlace, name: string): Promise<Record<string, string>>
   deleteSubsection(projectId: string, place: SheetPlace): Promise<boolean>
+  /** Move a sheet, or a subsection and everything in it, into the project's archive. Resolves with the sheet ids that changed, old to new. */
+  archiveInOutline(projectId: string, item: OutlineItem): Promise<Record<string, string>>
+  /** Put an archived sheet back where it came from. Resolves with its id, old to new. */
+  restoreSheet(projectId: string, sheetId: string): Promise<Record<string, string>>
   searchSheets(projectId: string, query: string): Promise<string[]>
   /** Without ids, exports the project's content. Without a format, the user is asked to pick one. */
   exportSheets(projectId: string, sheetIds: string[] | null, format?: ExportFormat): Promise<string | null>

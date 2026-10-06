@@ -14,7 +14,7 @@ import type {
   SyncSettings
 } from '../shared/types'
 import { exportDocument } from './export'
-import { Library } from './library'
+import { ARCHIVE_DIR, Library } from './library'
 import { GitSync, normalizeSyncSettings } from './sync'
 import { WELCOME_CANVAS, WELCOME_NOTES, WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
 
@@ -77,7 +77,9 @@ function registerFileProtocol(): void {
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
     const root = path.resolve(library.root)
     const file = path.resolve(root, ...parts)
-    if (url.host !== 'library' || parts.some((p) => p.startsWith('.')) || !file.startsWith(root + path.sep)) {
+    // Hidden files stay hidden, except an archived project's, such as images on its canvases.
+    const hidden = parts.some((p, i) => p.startsWith('.') && !(i === 0 && p === ARCHIVE_DIR))
+    if (url.host !== 'library' || hidden || !file.startsWith(root + path.sep)) {
       return new Response('Not found', { status: 404 })
     }
     return net.fetch(pathToFileURL(file).toString())
@@ -427,6 +429,9 @@ function registerIpc(): void {
     return ok
   })
 
+  ipcMain.handle('projects:archive', (_e, id: string) => changed(library.archiveProject(id)))
+  ipcMain.handle('projects:restore', (_e, id: string) => changed(library.restoreProject(id)))
+
   ipcMain.handle('folders:list', () => library.listFolders())
   ipcMain.handle('folders:create', (_e, name: string, parent?: string | null) =>
     changed(library.createFolder(name, parent))
@@ -502,6 +507,10 @@ function registerIpc(): void {
     if (ok) await changed(library.deleteSubsection(projectId, place))
     return ok
   })
+  ipcMain.handle('outline:archive', (_e, projectId: string, item: OutlineItem) =>
+    changed(library.archiveInOutline(projectId, item))
+  )
+  ipcMain.handle('sheets:restore', (_e, projectId: string, id: string) => changed(library.restoreSheet(projectId, id)))
   ipcMain.handle('sheets:search', (_e, projectId: string, query: string) => library.searchSheets(projectId, query))
 
   ipcMain.handle('export', async (_e, projectId: string, sheetIds: string[] | null, format?: ExportFormat) => {
