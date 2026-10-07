@@ -355,10 +355,17 @@ button {
   color: var(--text-muted);
 }
 
+.section-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 12px 8px;
+}
+
 .section-tabs {
+  flex: 1;
   display: flex;
   gap: 2px;
-  margin: 0 12px 8px;
   padding: 2px;
   border-radius: 8px;
   background: var(--bg-hover);
@@ -404,6 +411,12 @@ button {
 
 .section-tab.drop-target .section-count {
   color: inherit;
+}
+
+.archive-button.drop-target,
+.archive-button.drop-target:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 .search-field {

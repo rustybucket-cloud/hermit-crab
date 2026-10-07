@@ -3,7 +3,7 @@ import { isCanvasId } from '../../../shared/canvas'
 import type { OutlineItem, OutlineTarget, Section, SheetPlace, SheetSummary } from '../../../shared/types'
 import { formatCount, formatDate } from '../format'
 import { depthOf, isWithin, parentSubsection, placeName, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
-import { CanvasIcon, ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
+import { CanvasIcon, ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon, TrashIcon } from './Icons'
 import { blankContextMenu, RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
 
 const SUBSECTION_DRAG_TYPE = 'application/x-hermit-subsection'
@@ -337,49 +337,52 @@ export function SheetListPane(props: Props) {
       </header>
 
       {projectId && (
-        <div className="section-tabs" role="tablist" aria-label="Project sections">
-          {SECTIONS.map((s) => (
-            <button
-              key={s}
-              role="tab"
-              aria-selected={s === section && !archiveOpen}
-              className={['section-tab', s === section && !archiveOpen && 'active', s === tabDrop && 'drop-target']
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => props.onSectionChange(s)}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                props.onSectionMenu(s)
-              }}
-              title={`${SECTION_NAMES[s].label} (⌘3)`}
-              // Drop a sheet or subsection on the other section's tab to move it there.
-              onDragOver={(e) => {
-                if (s === section || !dragging.current || (s === 'content' && holdsCanvas(dragging.current))) return
-                e.preventDefault()
-                e.dataTransfer.dropEffect = 'move'
-                setTabDrop(s)
-              }}
-              onDragLeave={() => setTabDrop((t) => (t === s ? null : t))}
-              onDrop={(e) => {
-                const dragged = dragging.current
-                setTabDrop(null)
-                if (!dragged) return
-                e.preventDefault()
-                props.onMove(dragged, { into: { section: s, subsection: null } })
-              }}
-            >
-              {SECTION_NAMES[s].label}
-              <span className="section-count">{props.counts[s]}</span>
-            </button>
-          ))}
+        <div className="section-bar">
+          <div className="section-tabs" role="tablist" aria-label="Project sections">
+            {SECTIONS.map((s) => (
+              <button
+                key={s}
+                role="tab"
+                aria-selected={s === section && !archiveOpen}
+                className={['section-tab', s === section && !archiveOpen && 'active', s === tabDrop && 'drop-target']
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => props.onSectionChange(s)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  props.onSectionMenu(s)
+                }}
+                title={`${SECTION_NAMES[s].label} (⌘3)`}
+                // Drop a sheet or subsection on the other section's tab to move it there.
+                onDragOver={(e) => {
+                  if (s === section || !dragging.current || (s === 'content' && holdsCanvas(dragging.current))) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  setTabDrop(s)
+                }}
+                onDragLeave={() => setTabDrop((t) => (t === s ? null : t))}
+                onDrop={(e) => {
+                  const dragged = dragging.current
+                  setTabDrop(null)
+                  if (!dragged) return
+                  e.preventDefault()
+                  props.onMove(dragged, { into: { section: s, subsection: null } })
+                }}
+              >
+                {SECTION_NAMES[s].label}
+                <span className="section-count">{props.counts[s]}</span>
+              </button>
+            ))}
+          </div>
           <button
-            role="tab"
-            aria-selected={archiveOpen}
-            className={['section-tab', archiveOpen && 'active', tabDrop === 'archive' && 'drop-target']
+            className={['icon-button', 'archive-button', archiveOpen && 'on', tabDrop === 'archive' && 'drop-target']
               .filter(Boolean)
               .join(' ')}
-            onClick={props.onOpenArchive}
-            title="Archived sheets and notes"
+            aria-pressed={archiveOpen}
+            // Click again to go back to the section.
+            onClick={() => (archiveOpen ? props.onSectionChange(section) : props.onOpenArchive())}
+            title={`Archive (${props.counts.archive})`}
+            aria-label="Archive"
             // Drop a sheet or subsection here to archive it.
             onDragOver={(e) => {
               if (!dragging.current) return
@@ -396,8 +399,7 @@ export function SheetListPane(props: Props) {
               props.onArchive(dragged)
             }}
           >
-            Archive
-            <span className="section-count">{props.counts.archive}</span>
+            <TrashIcon />
           </button>
         </div>
       )}
