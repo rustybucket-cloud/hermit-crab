@@ -3,7 +3,8 @@ import { isCanvasId } from '../../../shared/canvas'
 import type { OutlineItem, OutlineTarget, Section, SheetPlace, SheetSummary } from '../../../shared/types'
 import { formatCount, formatDate } from '../format'
 import { depthOf, isWithin, parentSubsection, placeName, SECTION_NAMES, SECTIONS, subsectionName } from '../sections'
-import { CanvasIcon, ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
+import { touch } from '../device'
+import { BackIcon, CanvasIcon, ChevronIcon, ComposeIcon, PlusIcon, SearchIcon, SlidersIcon } from './Icons'
 import { blankContextMenu, RenameField, SHEET_DRAG_TYPE } from './LibraryPane'
 
 const SUBSECTION_DRAG_TYPE = 'application/x-hermit-subsection'
@@ -51,6 +52,8 @@ interface Props {
   onMove(item: OutlineItem, target: OutlineTarget): void
   onContextMenu(id: string): void
   onOpenProjectSettings(): void
+  /** On a phone, back to the library. */
+  onBack?(): void
 }
 
 type Where = 'before' | 'after' | 'into'
@@ -188,7 +191,7 @@ export function SheetListPane(props: Props) {
         key={sheet.id}
         className={['sheet-item', sheet.id === activeId && 'active', row && dropClass(rowKey(row))].filter(Boolean).join(' ')}
         style={{ marginLeft: row ? depthOf(sheet.subsection) * INDENT : 0 }}
-        draggable={Boolean(row) && !renaming}
+        draggable={!touch && Boolean(row) && !renaming}
         onClick={() => props.onSelect(sheet.id)}
         onDoubleClick={() => row && canvas && props.onStartRenameSheet(sheet.id)}
         onContextMenu={(e) => {
@@ -230,7 +233,7 @@ export function SheetListPane(props: Props) {
         key={rowKey(row)}
         className={['subsection-header', open && 'open', dropClass(rowKey(row))].filter(Boolean).join(' ')}
         style={{ marginLeft: indent }}
-        draggable={path !== renaming}
+        draggable={!touch && path !== renaming}
         onClick={() => collapsed.set(path, open)}
         onDoubleClick={() => props.onStartRenameSubsection(path)}
         onContextMenu={(e) => {
@@ -308,6 +311,11 @@ export function SheetListPane(props: Props) {
       onContextMenu={projectId && !archiveOpen ? blankContextMenu(() => props.onSectionMenu(section)) : undefined}
     >
       <header className="pane-header">
+        {props.onBack && (
+          <button className="icon-button back-button" onClick={props.onBack} aria-label="Back to projects">
+            <BackIcon />
+          </button>
+        )}
         <div className="pane-title">
           <span className="pane-title-name">{props.projectName}</span>
           {projectId && <span className="pane-title-meta">{formatCount(props.totalWords, 'word')}</span>}

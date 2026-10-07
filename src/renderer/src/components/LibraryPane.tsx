@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
 import type { ProjectSummary } from '../../../shared/types'
+import { touch } from '../device'
 import { ChevronIcon, FolderIcon, GearIcon, PlusIcon } from './Icons'
 
 export const SHEET_DRAG_TYPE = 'application/x-hermit-sheet'
@@ -152,7 +153,7 @@ export function LibraryPane(props: Props) {
       key={p.id}
       className={`project-item${p.id === activeId ? ' active' : ''}${p.id === dropTarget ? ' drop-target' : ''}`}
       style={{ marginLeft: depth * INDENT }}
-      draggable={p.id !== renamingId}
+      draggable={!touch && p.id !== renamingId}
       onClick={() => props.onSelect(p.id)}
       onDoubleClick={() => props.onStartRename(p.id)}
       onContextMenu={(e) => {
@@ -204,7 +205,7 @@ export function LibraryPane(props: Props) {
         key={`folder:${folder}`}
         className={['library-folder', open && 'open', dropTarget === folder && 'drop-target'].filter(Boolean).join(' ')}
         style={{ marginLeft: depth * INDENT }}
-        draggable={folder !== renamingFolder}
+        draggable={!touch && folder !== renamingFolder}
         onClick={() => collapsed.set(folder, open)}
         onDoubleClick={() => props.onStartRenameFolder(folder)}
         onContextMenu={(e) => {

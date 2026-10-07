@@ -18,13 +18,15 @@ import type {
 } from '../../shared/types'
 import { CanvasView } from './components/CanvasView'
 import { Editor, type EditorHandle } from './components/Editor'
-import { EyeIcon, FocusIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
+import { FormatBar } from './components/FormatBar'
+import { BackIcon, EyeIcon, FocusIcon, MoreIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
 import { MergeEditor } from './components/MergeEditor'
 import { Preview } from './components/Preview'
 import { ProjectSettings } from './components/ProjectSettings'
 import { SettingsOverlay, type SettingsTab } from './components/SettingsOverlay'
 import { SheetListPane } from './components/SheetListPane'
+import { touch, useCompact, useFocusWithin } from './device'
 import { formatCommands, type FormatCommand } from './editor/extensions'
 import { defaultDialect, type GrammarDialect } from './editor/grammar'
 import { formatCount } from './format'
@@ -52,7 +54,8 @@ interface Prefs {
 }
 
 const DEFAULT_PREFS: Prefs = {
-  showLibrary: true,
+  // A narrow iPad has room for the sheet list beside the editor, but not the library too.
+  showLibrary: !(touch && window.innerWidth < 1000),
   showSheets: true,
   preview: false,
   focus: false,
@@ -72,6 +75,12 @@ const FONTS: Record<EditorFont, string> = {
 
 const PREFS_KEY = 'hermit:prefs'
 const LAST_KEY = 'hermit:last'
+
+/** On a phone the panes show one at a time, like screens. */
+type Screen = 'library' | 'sheets' | 'editor'
+
+/** There's no Trash on iOS, so things there are deleted outright. */
+const TRASH_LABEL = touch ? 'Delete…' : 'Move to Trash…'
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -145,6 +154,12 @@ export default function App() {
   const [mergeOpen, setMergeOpen] = useState(false)
   // The project whose settings are open.
   const [projectSettingsFor, setProjectSettingsFor] = useState<string | null>(null)
+  const compact = useCompact()
+  // Back where things were left: the sheet that was open, or the library.
+  const [screen, setScreen] = useState<Screen>(() =>
+    loadJson<{ sheetId?: string }>(LAST_KEY, {}).sheetId ? 'editor' : 'library'
+  )
+  const editorFocused = useFocusWithin('.editor-host')
 
   const editor = useRef<EditorHandle>(null)
   // A canvas's edits arrive as its whole file.
@@ -374,6 +389,7 @@ export default function App() {
     const project = await hermit.createProject('Untitled Project', folder)
     await refreshProjects()
     setPrefs((p) => ({ ...p, showLibrary: true }))
+    setScreen('library')
     await openProject(project.id)
     setRenamingProject(project.id)
   }
@@ -406,6 +422,7 @@ export default function App() {
     const folder = await hermit.createFolder('New Folder', parent)
     await refreshProjects()
     setPrefs((p) => ({ ...p, showLibrary: true }))
+    setScreen('library')
     setRenamingFolder(folder)
   }
 
@@ -490,6 +507,7 @@ export default function App() {
     const sheet = await hermit.createSheet(pid, content, afterId, target)
     await Promise.all([refreshSheets(pid), refreshProjects()])
     await openSheet(pid, sheet.id)
+    setScreen('editor')
   }
 
   /** New canvases go in the notes: after the open note, or at the end of `place` when given. */
@@ -729,19 +747,49 @@ export default function App() {
     if (next && next.id !== current?.sheet.id) void openSheet(projectId, next.id)
   }
 
+  /** The item before (-1) or after (1) this one among those in the same section or subsection, if there is one. */
+  const neighbourOf = (item: OutlineItem, step: -1 | 1): OutlineItem | null => {
+    const parentOf = (i: OutlineItem) =>
+      i.kind === 'sheet' ? i.subsection : i.subsection.includes('/') ? i.subsection.slice(0, i.subsection.lastIndexOf('/')) : null
+    const key = (i: OutlineItem) => (i.kind === 'sheet' ? i.id : `/${i.subsection}`)
+    const siblings = outline.filter((i) => i.section === item.section && parentOf(i) === parentOf(item))
+    return siblings[siblings.findIndex((i) => key(i) === key(item)) + step] ?? null
+  }
+
+  /**
+   * Where a project or folder can be moved to, for touch, where there's no dragging: another folder, or the top
+   * of the library. Asks which, then moves it.
+   */
+  const chooseFolderFor = async (libraryPath: string) => {
+    const parent = libraryPath.includes('/') ? libraryPath.slice(0, libraryPath.lastIndexOf('/')) : null
+    const targets = [null, ...folders].filter(
+      (f) => f !== parent && f !== libraryPath && !f?.startsWith(`${libraryPath}/`)
+    )
+    const choice = await hermit.showContextMenu(
+      targets.map((f, i) => ({ id: String(i), label: f === null ? 'Top of the Library' : f.split('/').join(' › ') }))
+    )
+    if (choice !== null) void moveInLibrary(libraryPath, targets[Number(choice)])
+  }
+
+  /** Whether a project or folder has somewhere else to go. */
+  const canMoveInLibrary = (libraryPath: string) =>
+    libraryPath.includes('/') || folders.some((f) => f !== libraryPath && !f.startsWith(`${libraryPath}/`))
+
   const showProjectMenu = async (id: string) => {
     const inArchive = projects.find((p) => p.id === id)?.archived
     const choice = await hermit.showContextMenu([
       inArchive ? { id: 'restore', label: 'Restore from Archive' } : { id: 'rename', label: 'Rename' },
-      { id: 'reveal', label: 'Show in Finder' },
+      ...(touch ? [] : [{ id: 'reveal', label: 'Show in Finder' }]),
+      ...(touch && !inArchive && canMoveInLibrary(id) ? [{ id: 'move', label: 'Move to Folder…' }] : []),
       { id: 'settings', label: 'Project Settings…' },
       { type: 'separator' },
       ...exportItems(formatOf(id)),
       { type: 'separator' },
       ...(inArchive ? [] : [{ id: 'archive', label: 'Archive' }]),
-      { id: 'delete', label: 'Move to Trash…' }
+      { id: 'delete', label: TRASH_LABEL }
     ])
     if (choice === 'rename') setRenamingProject(id)
+    else if (choice === 'move') void chooseFolderFor(id)
     else if (choice === 'archive') void archiveProject(id)
     else if (choice === 'restore') void restoreProject(id)
     else if (choice === 'settings') setProjectSettingsFor(id)
@@ -759,7 +807,7 @@ export default function App() {
         ? []
         : [{ type: 'separator' as const }, ...exportItems(sheet.section === 'content' ? formatOf(projectId) : 'markdown')]),
       { type: 'separator' },
-      { id: 'delete', label: 'Move to Trash…' }
+      { id: 'delete', label: TRASH_LABEL }
     ])
     if (choice === 'restore') void restoreSheet(sheet.id)
     else if (choice === 'delete') void deleteSheet(sheet.id)
@@ -780,9 +828,13 @@ export default function App() {
     const canvas = isCanvasId(id)
     // Canvases stay in the notes, and only export as themselves, from Finder.
     const places = allPlaces.filter((place) => (!sheet || !samePlace(sheet, place)) && (!canvas || place.section === 'notes'))
+    const item: OutlineItem | null = sheet ? { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection } : null
+    const [up, down] = item ? [neighbourOf(item, -1), neighbourOf(item, 1)] : [null, null]
     const choice = await hermit.showContextMenu([
       ...(canvas ? [{ id: 'rename', label: 'Rename' }] : []),
       { id: 'duplicate', label: 'Duplicate' },
+      ...(touch && up ? [{ id: 'up', label: 'Move Up' }] : []),
+      ...(touch && down ? [{ id: 'down', label: 'Move Down' }] : []),
       ...places.map((place, i) => ({ id: `place:${i}`, label: `Move to ${placeName(place)}` })),
       ...(canvas
         ? []
@@ -795,10 +847,11 @@ export default function App() {
         : []),
       { type: 'separator' },
       { id: 'archive', label: 'Archive' },
-      { id: 'delete', label: 'Move to Trash…' }
+      { id: 'delete', label: TRASH_LABEL }
     ])
-    const item: OutlineItem | null = sheet ? { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection } : null
     if (choice === 'rename') setRenamingSheet(id)
+    else if (choice === 'up' && item && up) void moveItem(item, { before: up })
+    else if (choice === 'down' && item && down) void moveItem(item, { after: down })
     else if (choice === 'duplicate') void duplicateSheet(id)
     else if (choice?.startsWith('place:') && item) void moveItem(item, { into: places[Number(choice.slice(6))] })
     else if (choice === 'archive' && item) void archiveItem(item)
@@ -812,12 +865,14 @@ export default function App() {
       { id: 'new-project', label: 'New Project' },
       { id: 'new-folder', label: 'New Folder' },
       { id: 'rename', label: 'Rename' },
+      ...(touch && canMoveInLibrary(folder) ? [{ id: 'move', label: 'Move to Folder…' }] : []),
       { type: 'separator' },
-      { id: 'delete', label: 'Move to Trash…' }
+      { id: 'delete', label: TRASH_LABEL }
     ])
     if (choice === 'new-project') void createProject(folder)
     else if (choice === 'new-folder') void createFolder(folder)
     else if (choice === 'rename') setRenamingFolder(folder)
+    else if (choice === 'move') void chooseFolderFor(folder)
     else if (choice === 'delete') void deleteFolder(folder)
   }
 
@@ -876,15 +931,23 @@ export default function App() {
   }
 
   const showSubsectionMenu = async (place: SheetPlace) => {
+    const item: OutlineItem | null = place.subsection
+      ? { kind: 'subsection', section: place.section, subsection: place.subsection }
+      : null
+    const [up, down] = item ? [neighbourOf(item, -1), neighbourOf(item, 1)] : [null, null]
     const choice = await hermit.showContextMenu([
       { id: 'new', label: `New ${SECTION_NAMES[place.section].item}` },
       ...(place.section === 'notes' ? [{ id: 'new-canvas', label: 'New Canvas' }] : []),
       { id: 'new-subsection', label: 'New Subsection' },
       { id: 'rename', label: 'Rename' },
+      ...(touch && up ? [{ id: 'up', label: 'Move Up' }] : []),
+      ...(touch && down ? [{ id: 'down', label: 'Move Down' }] : []),
       { type: 'separator' },
       { id: 'archive', label: 'Archive' },
-      { id: 'delete', label: 'Move to Trash…' }
+      { id: 'delete', label: TRASH_LABEL }
     ])
+    if (choice === 'up' && item && up) return void moveItem(item, { before: up })
+    if (choice === 'down' && item && down) return void moveItem(item, { after: down })
     if (choice === 'new') void createSheet('', place)
     else if (choice === 'new-canvas') void createCanvas(place)
     else if (choice === 'new-subsection') void createSubsection(place)
@@ -965,8 +1028,8 @@ export default function App() {
       case 'export-sheet': return current && !onCanvas && void exportSheets(current.projectId, [current.sheet.id])
       case 'export-project': return projectId && void exportSheets(projectId, null)
       case 'project-settings': return projectId && setProjectSettingsFor(projectId)
-      case 'toggle-library': return togglePref('showLibrary')
-      case 'toggle-sheets': return togglePref('showSheets')
+      case 'toggle-library': return compact ? setScreen('library') : togglePref('showLibrary')
+      case 'toggle-sheets': return compact ? setScreen('sheets') : togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
       case 'toggle-section': return void switchSection(archiveOpen ? section : otherSection(section))
       case 'toggle-preview': return current && !onCanvas && togglePref('preview')
@@ -999,6 +1062,46 @@ export default function App() {
     }
   }
 
+  /** The editor's ⋯ menu: on touch, what the desktop keeps in its menu bar. */
+  const showEditorMenu = async (at: { x: number; y: number }) => {
+    const check = (on: boolean, label: string) => `${on ? '✓ ' : ''}${label}`
+    const choice = await hermit.showContextMenu(
+      [
+        ...(current && !onCanvas && !prefs.preview ? [{ id: 'find', label: 'Find…' }] : []),
+        ...(compact
+          ? [
+              { id: 'toggle-focus', label: check(prefs.focus, 'Focus Mode') },
+              { id: 'toggle-typewriter', label: check(prefs.typewriter, 'Typewriter Mode'), enabled: !onCanvas }
+            ]
+          : []),
+        { type: 'separator' },
+        { id: 'font-sans', label: check(prefs.font === 'sans', 'Sans Serif') },
+        { id: 'font-serif', label: check(prefs.font === 'serif', 'Serif') },
+        { id: 'font-mono', label: check(prefs.font === 'mono', 'Monospace') },
+        { id: 'font-bigger', label: 'Bigger Text' },
+        { id: 'font-smaller', label: 'Smaller Text' },
+        { type: 'separator' },
+        ...(current && !onCanvas ? [{ id: 'export-sheet', label: 'Export Sheet…' }] : []),
+        ...(projectId
+          ? [
+              { id: 'export-project', label: 'Export Project…' },
+              { id: 'project-settings', label: 'Project Settings…' }
+            ]
+          : []),
+        { type: 'separator' },
+        ...(sync?.remoteUrl && sync.settings.enabled ? [{ id: 'sync-now', label: 'Sync Now' }] : []),
+        { id: 'open-settings', label: 'Settings…' }
+      ],
+      at
+    )
+    if (choice) handleMenu(choice as MenuAction)
+  }
+
+  // On a phone, the editor has nothing to show once no sheet is open; go back to the list.
+  useEffect(() => {
+    if (compact && ready && !current && screen === 'editor') setScreen(projectId ? 'sheets' : 'library')
+  }, [compact, ready, current, screen, projectId])
+
   const menuHandler = useRef(handleMenu)
   useEffect(() => {
     menuHandler.current = handleMenu
@@ -1015,6 +1118,8 @@ export default function App() {
     0
   )
   const previewSource = prefs.preview && current ? liveDoc.current.toString() : ''
+  // Formatting above the on-screen keyboard while writing.
+  const formatBar = touch && editorFocused && Boolean(current) && !onCanvas && !prefs.preview && !conflicted
   const shortcutModifier = hermit.platform === 'darwin' ? '⌘' : 'Ctrl+'
 
   const style = {
@@ -1023,8 +1128,8 @@ export default function App() {
   } as CSSProperties
 
   return (
-    <div className={`app platform-${hermit.platform}`} style={style}>
-      {prefs.showLibrary && (
+    <div className={`app platform-${hermit.platform}${compact ? ' compact' : ''}`} style={style}>
+      {(compact ? screen === 'library' : prefs.showLibrary) && (
         <LibraryPane
           projects={projects.filter((p) => !p.archived)}
           archived={projects.filter((p) => p.archived)}
@@ -1032,7 +1137,10 @@ export default function App() {
           activeId={projectId}
           renamingId={renamingProject}
           renamingFolder={renamingFolder}
-          onSelect={(id) => id !== projectId && void openProject(id)}
+          onSelect={(id) => {
+            if (id !== projectId) void openProject(id)
+            setScreen('sheets')
+          }}
           onNewMenu={(at) => void showLibraryNewMenu(at)}
           onOpenSettings={() => openSettings('appearance')}
           onRename={(id, name) => void renameProject(id, name)}
@@ -1052,8 +1160,9 @@ export default function App() {
         />
       )}
 
-      {prefs.showSheets && (
+      {(compact ? screen === 'sheets' : prefs.showSheets) && (
         <SheetListPane
+          onBack={compact ? () => setScreen('library') : undefined}
           projectId={projectId}
           projectName={project?.name ?? 'No Project'}
           section={section}
@@ -1070,7 +1179,10 @@ export default function App() {
           onSectionChange={(s) => void switchSection(s)}
           onOpenArchive={() => void openArchive()}
           onArchive={(item) => void archiveItem(item)}
-          onSelect={(id) => projectId && id !== current?.sheet.id && void openSheet(projectId, id)}
+          onSelect={(id) => {
+            if (projectId && id !== current?.sheet.id) void openSheet(projectId, id)
+            setScreen('editor')
+          }}
           onCreate={(place) => void createSheet('', place)}
           onNewMenu={(at) => void showNewMenu(at)}
           onCreateCanvas={() => void createCanvas()}
@@ -1088,49 +1200,60 @@ export default function App() {
         />
       )}
 
-      <main className={`pane editor${prefs.focus ? ' focus-mode' : ''}`}>
+      {/* On a phone the editor stays put while hidden, so it keeps its place and its unsaved edits. */}
+      <main className={`pane editor${prefs.focus ? ' focus-mode' : ''}`} hidden={compact && screen !== 'editor'}>
         {/* Toolbar clicks shouldn't pull focus out of the editor. */}
         <header className="pane-header editor-toolbar" onMouseDown={(e) => e.preventDefault()}>
-          <div className="pane-toggles" role="group" aria-label="Navigation panes">
-            <button
-              className={`icon-button${prefs.showLibrary ? ' on' : ''}`}
-              onClick={() => togglePref('showLibrary')}
-              aria-label={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar`}
-              aria-pressed={prefs.showLibrary}
-              title={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar (${shortcutModifier}1)`}
-            >
-              <SidebarIcon />
+          {compact ? (
+            <button className="icon-button back-button" onClick={() => setScreen('sheets')} aria-label="Back to sheets">
+              <BackIcon />
             </button>
-            <button
-              className={`icon-button${prefs.showSheets ? ' on' : ''}`}
-              onClick={() => togglePref('showSheets')}
-              aria-label={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list`}
-              aria-pressed={prefs.showSheets}
-              title={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list (${shortcutModifier}2)`}
-            >
-              <SheetsIcon />
-            </button>
-          </div>
+          ) : (
+            <div className="pane-toggles" role="group" aria-label="Navigation panes">
+              <button
+                className={`icon-button${prefs.showLibrary ? ' on' : ''}`}
+                onClick={() => togglePref('showLibrary')}
+                aria-label={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar`}
+                aria-pressed={prefs.showLibrary}
+                title={`${prefs.showLibrary ? 'Hide' : 'Show'} projects sidebar (${shortcutModifier}1)`}
+              >
+                <SidebarIcon />
+              </button>
+              <button
+                className={`icon-button${prefs.showSheets ? ' on' : ''}`}
+                onClick={() => togglePref('showSheets')}
+                aria-label={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list`}
+                aria-pressed={prefs.showSheets}
+                title={`${prefs.showSheets ? 'Hide' : 'Show'} sheets list (${shortcutModifier}2)`}
+              >
+                <SheetsIcon />
+              </button>
+            </div>
+          )}
           <div className="toolbar-spacer" />
           {(current?.sheet.section === 'notes' || current?.sheet.subsection) && (
             <span className="place-label">{placeName(current.sheet)}</span>
           )}
           <div className="toolbar-modes">
-            <button
-              className={`icon-button${prefs.focus ? ' on' : ''}`}
-              onClick={toggleFocus}
-              title="Focus Mode (⇧⌘F)"
-            >
-              <FocusIcon />
-            </button>
-            <button
-              className={`icon-button${prefs.typewriter ? ' on' : ''}`}
-              onClick={() => togglePref('typewriter')}
-              disabled={onCanvas}
-              title="Typewriter Mode (⇧⌘T)"
-            >
-              <TypewriterIcon />
-            </button>
+            {!compact && (
+              <>
+                <button
+                  className={`icon-button${prefs.focus ? ' on' : ''}`}
+                  onClick={toggleFocus}
+                  title="Focus Mode (⇧⌘F)"
+                >
+                  <FocusIcon />
+                </button>
+                <button
+                  className={`icon-button${prefs.typewriter ? ' on' : ''}`}
+                  onClick={() => togglePref('typewriter')}
+                  disabled={onCanvas}
+                  title="Typewriter Mode (⇧⌘T)"
+                >
+                  <TypewriterIcon />
+                </button>
+              </>
+            )}
             <button
               className={`icon-button${prefs.preview ? ' on' : ''}`}
               onClick={() => togglePref('preview')}
@@ -1139,6 +1262,19 @@ export default function App() {
             >
               <EyeIcon />
             </button>
+            {touch && (
+              <button
+                className="icon-button"
+                aria-label="More"
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  void showEditorMenu({ x: rect.left, y: rect.bottom + 4 })
+                }}
+              >
+                <MoreIcon />
+              </button>
+            )}
           </div>
         </header>
 
@@ -1185,6 +1321,8 @@ export default function App() {
                 fontKey={`${prefs.font}:${prefs.fontSize}`}
                 hidden={prefs.preview}
                 readOnly={conflicted}
+                // On touch, the keyboard comes up only once the writer taps into the text.
+                autoFocus={!touch}
                 onChange={handleChange}
               />
               {prefs.preview && <Preview text={previewSource} format={sheetFormat} />}
@@ -1226,7 +1364,15 @@ export default function App() {
           )}
         </div>
 
-        {current && (
+        {formatBar && (
+          <FormatBar
+            format={sheetFormat}
+            onRun={(command) => editor.current?.run(command)}
+            onDone={() => editor.current?.blur()}
+          />
+        )}
+
+        {current && !(compact && formatBar) && (
           <footer className="status-bar">
             {stats.canvas !== undefined ? (
               <span>{stats.canvas}</span>

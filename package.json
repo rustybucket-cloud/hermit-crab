@@ -13,9 +13,12 @@
     "build": "electron-vite build",
     "preview": "install-electron && electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "package": "pnpm build && electron-builder"
+    "package": "pnpm build && electron-builder",
+    "ios:build": "vite build --config vite.mobile.config.ts && cap sync ios",
+    "ios:open": "cap open ios"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -27,6 +30,14 @@
     "vite": "^7.3.6"
   },
   "dependencies": {
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/keyboard": "^8.0.6",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.3",
+    "@capacitor/status-bar": "^8.0.4",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.12.4",
@@ -36,10 +47,13 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
     "@lezer/highlight": "^1.2.5",
+    "buffer": "^6.0.3",
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.16",
     "harper.js": "^2.10.0",
+    "isomorphic-git": "^1.43.1",
     "marked": "^18.0.14",
+    "node-diff3": "^3.2.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

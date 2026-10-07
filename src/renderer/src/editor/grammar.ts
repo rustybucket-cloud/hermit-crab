@@ -1,8 +1,9 @@
-import { forceLinting, linter, lintKeymap, type Action, type Diagnostic } from '@codemirror/lint'
-import { StateEffect, type Extension } from '@codemirror/state'
-import { EditorView, keymap, ViewPlugin } from '@codemirror/view'
+import { forceLinting, forEachDiagnostic, linter, lintKeymap, type Action, type Diagnostic } from '@codemirror/lint'
+import { StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state'
+import { EditorView, keymap, showTooltip, ViewPlugin, type Tooltip } from '@codemirror/view'
 import type { Lint, Linter, Suggestion } from 'harper.js'
 import type { ContentFormat } from '../../../shared/types'
+import { touch } from '../device'
 
 /**
  * Grammar checking with Harper, which runs entirely on this computer in a web worker.
@@ -180,6 +181,58 @@ function toDiagnostic(harper: Harper, source: string, lint: Lint): Diagnostic {
   }
 }
 
+// ── Touch ───────────────────────────────────────────────────────────────────
+
+/** The suggestions for the issue under the caret, in the same look as the hover tooltip. */
+function tapTooltip(state: EditorState): Tooltip | null {
+  const { main } = state.selection
+  if (!main.empty) return null
+  let found: { diagnostic: Diagnostic; from: number; to: number } | null = null
+  forEachDiagnostic(state, (diagnostic, from, to) => {
+    if (!found && from <= main.head && main.head <= to) found = { diagnostic, from, to }
+  })
+  if (!found) return null
+  const { diagnostic, from, to } = found as { diagnostic: Diagnostic; from: number; to: number }
+  return {
+    pos: from,
+    end: to,
+    above: false,
+    create(view) {
+      const dom = document.createElement('div')
+      dom.className = 'cm-tooltip-lint'
+      const item = dom.appendChild(document.createElement('div'))
+      item.className = 'cm-diagnostic cm-diagnostic-info'
+      const text = item.appendChild(document.createElement('span'))
+      text.className = 'cm-diagnosticText'
+      text.append(diagnostic.renderMessage?.(view) ?? diagnostic.message)
+      for (const action of diagnostic.actions ?? []) {
+        const button = item.appendChild(document.createElement('button'))
+        button.type = 'button'
+        button.className = `cm-diagnosticAction${action.markClass ? ` ${action.markClass}` : ''}`
+        button.textContent = action.name
+        // Keep the keyboard up: the tap mustn't take focus from the text.
+        button.addEventListener('mousedown', (e) => e.preventDefault())
+        button.addEventListener('click', () => action.apply(view, from, to))
+      }
+      return { dom }
+    }
+  }
+}
+
+/**
+ * There's no hovering on a touchscreen, so suggestions show when the caret is put in an underlined word. They go
+ * as soon as the writer types or moves on.
+ */
+const tapSuggestions = StateField.define<Tooltip | null>({
+  create: () => null,
+  update(tooltip, tr) {
+    if (tr.docChanged) return null
+    if (tr.selection) return tr.isUserEvent('select') ? tapTooltip(tr.state) : null
+    return tooltip
+  },
+  provide: (field) => showTooltip.from(field)
+})
+
 // ── Look ────────────────────────────────────────────────────────────────────
 
 const grammarTheme = EditorView.theme({
@@ -264,6 +317,7 @@ export function grammarChecker(dialect: GrammarDialect, format: ContentFormat = 
       { delay: 600, needsRefresh: (update) => update.transactions.some((tr) => tr.effects.some((e) => e.is(recheck))) }
     ),
     keymap.of(lintKeymap),
+    touch ? tapSuggestions : [],
     trackView,
     grammarTheme
   ]

@@ -166,3 +166,75 @@ export const ArrowIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 12h16M14 6l6 6-6 6" />
   </svg>
 )
+
+export const BackIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="m15 5-7 7 7 7" />
+  </svg>
+)
+
+export const MoreIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="5" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="19" cy="12" r="1.2" fill="currentColor" />
+  </svg>
+)
+
+export const BoldIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)} strokeWidth={2.4}>
+    <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7Zm0 7h7a3.5 3.5 0 0 1 0 7H7Z" />
+  </svg>
+)
+
+export const ItalicIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M10 5h8M6 19h8M14 5l-4 14" />
+  </svg>
+)
+
+export const UnderlineIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M7 4v7a5 5 0 0 0 10 0V4M5 20h14" />
+  </svg>
+)
+
+export const LinkIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+  </svg>
+)
+
+export const QuoteIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M6 6v12M10 9h9M10 13h9M10 17h6" />
+  </svg>
+)
+
+export const CodeIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />
+  </svg>
+)
+
+export const UndoIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+)
+
+export const RedoIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+  </svg>
+)
+
+export const KeyboardDownIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="11" rx="2" />
+    <path d="M7 8h.01M11 8h.01M15 8h.01M8 12h8M9 19l3 2 3-2" />
+  </svg>
+)

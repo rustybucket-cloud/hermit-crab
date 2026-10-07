@@ -31,6 +31,7 @@ interface Props {
 export function SyncSettings({ sync, onOpenMerge }: Props) {
   const [url, setUrl] = useState(sync?.remoteUrl ?? '')
   const [branch, setBranch] = useState(sync?.settings.branch ?? 'main')
+  const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -40,6 +41,8 @@ export function SyncSettings({ sync, onOpenMerge }: Props) {
   if (!sync) return null
   const { settings } = sync
   const connected = Boolean(sync.remoteUrl)
+  // On iOS there's no git of the computer's to sign in with, so sync uses an access token.
+  const usesToken = sync.credentials === 'token'
   const agentName = AGENTS.find((a) => a.id === settings.agent)!.name
 
   const run = async (work: () => Promise<unknown>) => {
@@ -57,6 +60,11 @@ export function SyncSettings({ sync, onOpenMerge }: Props) {
 
   const update = (patch: Partial<Settings>) => void run(() => hermit.updateSyncSettings(patch))
   const connect = () => void run(() => hermit.connectSync(url))
+  const saveToken = (value: string | null) =>
+    void run(async () => {
+      await hermit.setSyncToken?.(value)
+      setToken('')
+    })
 
   const statusLine = (() => {
     switch (sync.status) {
@@ -73,16 +81,63 @@ export function SyncSettings({ sync, onOpenMerge }: Props) {
     <>
       <section className="settings-section">
         <h2>GitHub Sync</h2>
-        <p className="settings-hint flush">
-          Hermit Crab commits your library to a Git repository while you write, pushes it to GitHub, and pulls in changes
-          made elsewhere. It uses your computer’s own <code>git</code>, so it works with any repository you can already
-          push to.
-        </p>
+        {usesToken ? (
+          <p className="settings-hint flush">
+            Hermit Crab commits your library to a Git repository while you write, pushes it to GitHub, and pulls in
+            changes made elsewhere, such as in Hermit Crab on your Mac.
+          </p>
+        ) : (
+          <p className="settings-hint flush">
+            Hermit Crab commits your library to a Git repository while you write, pushes it to GitHub, and pulls in
+            changes made elsewhere. It uses your computer’s own <code>git</code>, so it works with any repository you can
+            already push to.
+          </p>
+        )}
 
         {!sync.gitAvailable ? (
           <p className="settings-error">{sync.message}</p>
         ) : (
           <>
+            {usesToken && (
+              <>
+                <label className="field-label" htmlFor="sync-token">
+                  Access Token
+                </label>
+                {sync.hasToken ? (
+                  <div className="field-row">
+                    <span className="sync-token-saved">A token is saved in the keychain.</span>
+                    <button className="ghost-button" disabled={busy} onClick={() => saveToken(null)}>
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="field-row">
+                      <input
+                        id="sync-token"
+                        className="text-field"
+                        type="password"
+                        value={token}
+                        placeholder="github_pat_…"
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        onChange={(e) => setToken(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && token.trim() && saveToken(token)}
+                      />
+                      <button className="primary-button" disabled={busy || !token.trim()} onClick={() => saveToken(token)}>
+                        Save
+                      </button>
+                    </div>
+                    <p className="settings-hint">
+                      On GitHub, under Settings › Developer settings › Personal access tokens, create a fine-grained
+                      token for the repository with read and write access to its contents, and paste it here.
+                    </p>
+                  </>
+                )}
+              </>
+            )}
+
             <label className="field-label" htmlFor="sync-url">
               Repository
             </label>
@@ -91,14 +146,16 @@ export function SyncSettings({ sync, onOpenMerge }: Props) {
                 id="sync-url"
                 className="text-field"
                 value={url}
-                placeholder="git@github.com:you/writing.git"
+                placeholder={usesToken ? 'https://github.com/you/writing' : 'git@github.com:you/writing.git'}
                 spellCheck={false}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && url.trim() && connect()}
               />
               <button
                 className="primary-button"
-                disabled={busy || !url.trim() || (connected && url.trim() === sync.remoteUrl)}
+                disabled={
+                  busy || !url.trim() || (connected && url.trim() === sync.remoteUrl) || (usesToken && !sync.hasToken)
+                }
                 onClick={connect}
               >
                 {connected ? 'Change' : 'Connect'}
@@ -199,41 +256,50 @@ export function SyncSettings({ sync, onOpenMerge }: Props) {
             </p>
           </section>
 
-          <section className="settings-section">
-            <h3>Merge Conflicts</h3>
-            <p className="settings-hint flush">
-              When the same sheet changes here and on GitHub, the merge editor opens so you can choose what to keep. A
-              coding agent on this computer can do a first pass for you.
-            </p>
-            <div className="segmented" role="radiogroup" aria-label="Conflict helper">
-              {AGENTS.map((agent) => (
-                <button
-                  key={agent.id}
-                  role="radio"
-                  aria-checked={settings.agent === agent.id}
-                  className={settings.agent === agent.id ? 'selected' : ''}
-                  onClick={() => update({ agent: agent.id })}
-                >
-                  {agent.name}
-                  {!sync.agents[agent.id] && <span className="muted"> · not installed</span>}
-                </button>
-              ))}
-            </div>
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={settings.autoResolve}
-                disabled={!sync.agents[settings.agent]}
-                onChange={(e) => update({ autoResolve: e.target.checked })}
-              />
-              <span>Send conflicts to {agentName} automatically</span>
-            </label>
-            <p className="settings-hint">
-              {sync.agents[settings.agent]
-                ? `${agentName} runs locally in your library folder and only edits the conflicted files. Nothing is synced until you review its changes in the merge editor.`
-                : `Install the ${agentName} command-line tool to use it here.`}
-            </p>
-          </section>
+          {usesToken ? (
+            <section className="settings-section">
+              <h3>Merge Conflicts</h3>
+              <p className="settings-hint flush">
+                When the same sheet changes here and on GitHub, the merge editor opens so you can choose what to keep.
+              </p>
+            </section>
+          ) : (
+            <section className="settings-section">
+              <h3>Merge Conflicts</h3>
+              <p className="settings-hint flush">
+                When the same sheet changes here and on GitHub, the merge editor opens so you can choose what to keep. A
+                coding agent on this computer can do a first pass for you.
+              </p>
+              <div className="segmented" role="radiogroup" aria-label="Conflict helper">
+                {AGENTS.map((agent) => (
+                  <button
+                    key={agent.id}
+                    role="radio"
+                    aria-checked={settings.agent === agent.id}
+                    className={settings.agent === agent.id ? 'selected' : ''}
+                    onClick={() => update({ agent: agent.id })}
+                  >
+                    {agent.name}
+                    {!sync.agents[agent.id] && <span className="muted"> · not installed</span>}
+                  </button>
+                ))}
+              </div>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.autoResolve}
+                  disabled={!sync.agents[settings.agent]}
+                  onChange={(e) => update({ autoResolve: e.target.checked })}
+                />
+                <span>Send conflicts to {agentName} automatically</span>
+              </label>
+              <p className="settings-hint">
+                {sync.agents[settings.agent]
+                  ? `${agentName} runs locally in your library folder and only edits the conflicted files. Nothing is synced until you review its changes in the merge editor.`
+                  : `Install the ${agentName} command-line tool to use it here.`}
+              </p>
+            </section>
+          )}
         </>
       )}
     </>

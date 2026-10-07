@@ -3,6 +3,7 @@ import { EditorView } from '@codemirror/view'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseConflicts, resolveHunk, type ConflictHunk, type HunkChoice } from '../../../shared/conflicts'
 import type { ConflictFile, SyncState } from '../../../shared/types'
+import { touch } from '../device'
 import { conflictHighlight } from '../editor/conflicts'
 import { plainExtensions } from '../editor/extensions'
 import { CloseIcon } from './Icons'
@@ -116,7 +117,7 @@ export function MergeEditor({ sync, onClose }: Props) {
         <header className="settings-header">
           <h1>Resolve Sync Conflicts</h1>
           <div className="merge-header-actions">
-            {resolving ? (
+            {sync.credentials === 'token' ? null : resolving ? (
               <button className="ghost-button" onClick={() => void hermit.cancelAgent()}>
                 Stop {agentName}
               </button>
@@ -207,7 +208,7 @@ export function MergeEditor({ sync, onClose }: Props) {
                         <div className="hunk" key={`${i}:${hunk.from}`}>
                           <div className="hunk-title">Conflict {i + 1}</div>
                           <div className="hunk-sides">
-                            <HunkSide label="This computer" side="ours" text={hunk.ours} onUse={() => choose(hunk, 'ours')} disabled={resolving} />
+                            <HunkSide label={touch ? 'This device' : 'This computer'} side="ours" text={hunk.ours} onUse={() => choose(hunk, 'ours')} disabled={resolving} />
                             <HunkSide label="GitHub" side="theirs" text={hunk.theirs} onUse={() => choose(hunk, 'theirs')} disabled={resolving} />
                           </div>
                           <button className="ghost-button" disabled={resolving} onClick={() => choose(hunk, 'both')}>

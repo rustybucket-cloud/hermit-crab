@@ -138,6 +138,10 @@ export type SyncStatus = 'off' | 'idle' | 'syncing' | 'conflict' | 'resolving' |
 export interface SyncState {
   settings: SyncSettings
   gitAvailable: boolean
+  /** How sync signs in to GitHub: with the computer's own git setup, or with an access token kept by the app. */
+  credentials: 'system' | 'token'
+  /** Whether an access token is saved, where sync uses one. */
+  hasToken?: boolean
   /** Which conflict helpers are installed on this machine. */
   agents: Record<SyncAgent, boolean>
   remoteUrl: string | null
@@ -169,6 +173,8 @@ export interface HermitApi {
   /** Ask the user for a new library folder and switch to it. Resolves with the folder, or null if cancelled. */
   chooseLibraryLocation(): Promise<string | null>
   revealLibrary(): Promise<void>
+  /** A URL that shows a file in the library, such as an image on a canvas, from its path in the library. */
+  fileUrl(libraryPath: string): string
   listProjects(): Promise<ProjectSummary[]>
   createProject(name: string, folder?: string | null): Promise<ProjectSummary>
   renameProject(projectId: string, name: string): Promise<ProjectSummary>
@@ -220,6 +226,8 @@ export interface HermitApi {
   setAppIcon(dataUrl: string): void
   getSyncState(): Promise<SyncState>
   updateSyncSettings(patch: Partial<SyncSettings>): Promise<SyncState>
+  /** Save the GitHub access token sync signs in with, or forget it with null. Only where `credentials` is `token`. */
+  setSyncToken?(token: string | null): Promise<SyncState>
   /** Point the library at a GitHub repository and run a first sync. */
   connectSync(remoteUrl: string): Promise<SyncState>
   syncNow(): Promise<SyncState>

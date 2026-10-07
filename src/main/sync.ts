@@ -2,9 +2,8 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { commitMessage, conflictLabel, isMetaFile, MAX_COMMIT_WAIT, mergeMeta, normalizeSyncSettings, withIgnored } from '../shared/sync'
 import type { ConflictFile, SyncAgent, SyncSettings, SyncState, SyncStatus } from '../shared/types'
-import { summarize } from '../shared/text'
-import { normalizeProjectSettings } from './library'
 import { childEnv, findExecutable } from './shell-env'
 
 /**
@@ -17,20 +16,8 @@ import { childEnv, findExecutable } from './shell-env'
  * in the merge editor (optionally with help from Claude Code or Codex).
  */
 
-export const DEFAULT_SYNC: SyncSettings = {
-  enabled: false,
-  branch: 'main',
-  commitDelay: 30,
-  pullInterval: 5,
-  agent: 'claude',
-  autoResolve: false
-}
-
 export const AGENT_NAMES: Record<SyncAgent, string> = { claude: 'Claude Code', codex: 'Codex' }
 
-const IGNORED = ['.DS_Store', '.*.tmp', 'Thumbs.db']
-/** Even while typing non-stop, commit at least this often. */
-const MAX_COMMIT_WAIT = 5 * 60_000
 const AGENT_TIMEOUT = 10 * 60_000
 
 export interface SyncHost {
@@ -46,20 +33,6 @@ interface GitResult {
   stdout: string
   stderr: string
   code: number
-}
-
-export function normalizeSyncSettings(raw: Partial<SyncSettings> | undefined): SyncSettings {
-  const s = { ...DEFAULT_SYNC, ...raw }
-  const clamp = (n: unknown, min: number, max: number, fallback: number) =>
-    typeof n === 'number' && Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback
-  return {
-    enabled: Boolean(s.enabled),
-    branch: typeof s.branch === 'string' && s.branch.trim() ? s.branch.trim() : DEFAULT_SYNC.branch,
-    commitDelay: clamp(s.commitDelay, 5, 3600, DEFAULT_SYNC.commitDelay),
-    pullInterval: clamp(s.pullInterval, 1, 240, DEFAULT_SYNC.pullInterval),
-    agent: s.agent === 'codex' ? 'codex' : 'claude',
-    autoResolve: Boolean(s.autoResolve)
-  }
 }
 
 /** Turn git's stderr into one sentence a writer can act on. */
@@ -174,6 +147,7 @@ export class GitSync {
     return {
       settings: this.settings,
       gitAvailable: Boolean(this.gitPath),
+      credentials: 'system',
       agents: this.agents,
       remoteUrl: this.remoteUrl,
       status: this.status,
@@ -296,13 +270,8 @@ export class GitSync {
     if (!(await this.isRepo())) await this.git(['init', '--quiet', '-b', this.settings.branch])
 
     const ignoreFile = path.join(this.root, '.gitignore')
-    const existing = await fs.readFile(ignoreFile, 'utf8').catch(() => '')
-    const lines = existing.split(/\r?\n/)
-    const missing = IGNORED.filter((p) => !lines.includes(p))
-    if (missing.length) {
-      const sep = existing && !existing.endsWith('\n') ? '\n' : ''
-      await fs.writeFile(ignoreFile, existing + sep + missing.join('\n') + '\n')
-    }
+    const ignore = withIgnored(await fs.readFile(ignoreFile, 'utf8').catch(() => ''))
+    if (ignore !== null) await fs.writeFile(ignoreFile, ignore)
 
     // Commits need an author; fall back to something sensible if git has never been set up.
     if (!(await this.git(['config', 'user.email'], true)).stdout.trim()) {
@@ -438,48 +407,17 @@ export class GitSync {
     const files = await this.names(['diff', '--cached', '--name-only'])
     if (!files.length) return
     const first = (await this.revParse('HEAD')) === null
-    const message = first ? 'Start syncing with Hermit Crab' : await this.commitMessage(files)
+    const read = (file: string) => fs.readFile(this.abs(file), 'utf8').catch(() => null)
+    const message = first ? 'Start syncing with Hermit Crab' : await commitMessage(files, read)
     await this.git(['commit', '--quiet', '--no-verify', '-m', message])
   }
 
-  private async commitMessage(files: string[]): Promise<string> {
-    const sheets = files.filter((f) => f.endsWith('.md'))
-    const projects = [...new Set(files.map((f) => f.split('/')[0]))]
-    const where = projects.length === 1 ? ` in ${projects[0]}` : ''
-    if (sheets.length === 1) {
-      const content = await fs.readFile(this.abs(sheets[0]), 'utf8').catch(() => null)
-      if (content === null) return `Remove a sheet${where}`
-      const title = summarize(content).title || 'Untitled'
-      return `Update “${title.slice(0, 60)}”${where}`
-    }
-    if (sheets.length > 1) return `Update ${sheets.length} sheets${where}`
-    return `Update library${where}`
-  }
-
-  /**
-   * Project meta files are easy to merge mechanically: keep our order, then add anything new from GitHub.
-   * Settings changed on both sides keep ours.
-   */
+  /** Project meta files merge mechanically; see mergeMeta. */
   private async autoResolveMeta(): Promise<void> {
     const conflicted = await this.names(['diff', '--name-only', '--diff-filter=U'])
-    for (const file of conflicted.filter((f) => path.posix.basename(f) === '.hermit.json')) {
-      const read = async (stage: number): Promise<{ order: string[]; settings?: unknown } | null> => {
-        const raw = await this.show(`:${stage}:${file}`)
-        if (raw === null) return null
-        try {
-          const { order, settings } = JSON.parse(raw)
-          return {
-            order: Array.isArray(order) ? order.filter((x: unknown): x is string => typeof x === 'string') : [],
-            settings
-          }
-        } catch {
-          return { order: [] }
-        }
-      }
-      const [ours, theirs] = await Promise.all([read(2), read(3)])
-      const order = [...(ours?.order ?? []), ...(theirs?.order ?? []).filter((id) => !ours?.order.includes(id))]
-      const settings = normalizeProjectSettings(ours?.settings ?? theirs?.settings)
-      await fs.writeFile(this.abs(file), JSON.stringify({ settings, order }, null, 2))
+    for (const file of conflicted.filter(isMetaFile)) {
+      const [ours, theirs] = await Promise.all([this.show(`:2:${file}`), this.show(`:3:${file}`)])
+      await fs.writeFile(this.abs(file), mergeMeta(ours, theirs))
       await this.git(['add', '--', file])
     }
   }
@@ -496,9 +434,7 @@ export class GitSync {
           this.show(`:3:${file}`),
           fs.readFile(this.abs(file), 'utf8').catch(() => '')
         ])
-        const project = path.posix.dirname(file)
-        const title = file.endsWith('.md') ? summarize(ours ?? theirs ?? '').title || 'Untitled' : path.posix.basename(file)
-        return { path: file, label: project === '.' ? title : `${title} — ${project}`, ours, theirs, content }
+        return { path: file, label: conflictLabel(file, ours, theirs), ours, theirs, content }
       })
     )
   }

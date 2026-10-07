@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { touch } from '../device'
 import { clearIgnoredSuggestions, DIALECTS, type GrammarDialect } from '../editor/grammar'
 
 export interface GrammarPrefs {
@@ -18,8 +19,8 @@ export function WritingSettings({ grammar, dialect, onChange }: Props) {
       <h2>Grammar</h2>
       <p className="settings-hint flush">
         Hermit Crab checks grammar, word choice and punctuation as you write, and underlines anything worth a second
-        look. Hover over an underline to see suggestions. Checking happens entirely on this computer; nothing you write
-        is sent anywhere.
+        look. {touch ? 'Tap an underlined word' : 'Hover over an underline'} to see suggestions. Checking happens entirely
+        on this {touch ? 'device' : 'computer'}; nothing you write is sent anywhere.
       </p>
 
       <label className="toggle-row">
@@ -58,7 +59,8 @@ export function WritingSettings({ grammar, dialect, onChange }: Props) {
         </div>
       </div>
       <p className="settings-hint">
-        Spelling is checked separately by your system’s dictionary. Right-click a misspelled word for suggestions.
+        Spelling is checked separately by your system’s dictionary.{' '}
+        {touch ? 'Tap a misspelled word for suggestions.' : 'Right-click a misspelled word for suggestions.'}
       </p>
     </section>
   )
