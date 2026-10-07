@@ -135,7 +135,7 @@ function createWindow(): void {
     minWidth: 640,
     minHeight: 420,
     show: false,
-    title: 'Hermit Crab',
+    title: 'HermitCrab',
     icon: appIcon,
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 18, y: 18 },
@@ -546,7 +546,9 @@ function registerIpc(): void {
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 
-app.setName('Hermit Crab')
+app.setName('HermitCrab')
+// Settings live in the folder named before the rename, so existing ones carry over.
+app.setPath('userData', path.join(app.getPath('appData'), 'Hermit Crab'))
 
 app.whenReady().then(async () => {
   if (isMac) app.dock?.setIcon(appIcon)
