@@ -13,10 +13,12 @@ import type {
   SheetPlace,
   SyncSettings
 } from '../shared/types'
+import { ARCHIVE_DIR, Library } from '../shared/library'
+import { createWelcomeProject } from '../shared/welcome'
 import { exportDocument } from './export'
-import { ARCHIVE_DIR, Library } from './library'
-import { GitSync, normalizeSyncSettings } from './sync'
-import { WELCOME_CANVAS, WELCOME_NOTES, WELCOME_PROJECT, WELCOME_SHEETS } from './welcome'
+import { nodeFs } from './node-fs'
+import { normalizeSyncSettings } from '../shared/sync'
+import { GitSync } from './sync'
 
 interface Settings {
   libraryPath?: string
@@ -53,16 +55,8 @@ async function saveSettings(): Promise<void> {
 
 /** Only switches to the new library once it's ready, so a folder that can't be opened leaves the old one in place. */
 async function openLibrary(root: string): Promise<void> {
-  const next = new Library(root)
-  const existed = await next.ensure()
-  if (!existed) {
-    const project = await next.createProject(WELCOME_PROJECT)
-    for (const content of WELCOME_SHEETS) await next.createSheet(project.id, content)
-    const notes = { section: 'notes', subsection: null } as const
-    const created = []
-    for (const content of WELCOME_NOTES) created.push(await next.createSheet(project.id, content, undefined, notes))
-    await next.createCanvas(project.id, notes, 'Planning Board', WELCOME_CANVAS(`${created[0].id}.md`))
-  }
+  const next = new Library(root, nodeFs)
+  if (!(await next.ensure())) await createWelcomeProject(next, process.platform)
   library = next
 }
 
@@ -421,7 +415,7 @@ function registerIpc(): void {
   ipcMain.handle('projects:update-settings', (_e, id: string, patch: Partial<ProjectSettings>) =>
     changed(library.updateProjectSettings(id, patch))
   )
-  ipcMain.handle('projects:reveal', (_e, id: string) => library.revealProject(id))
+  ipcMain.handle('projects:reveal', (_e, id: string) => shell.showItemInFolder(library.libraryDir(id)))
   ipcMain.handle('projects:delete', async (_e, id: string) => {
     const name = id.slice(id.lastIndexOf('/') + 1)
     const ok = await confirm(`Move “${name}” to the Trash?`, 'The project folder and all of its sheets will be moved to the Trash.', 'Move to Trash')

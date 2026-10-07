@@ -12,6 +12,8 @@ const api: HermitApi = {
   getLibraryLocation: () => ipcRenderer.invoke('library:location'),
   chooseLibraryLocation: () => ipcRenderer.invoke('library:choose'),
   revealLibrary: () => ipcRenderer.invoke('library:reveal'),
+  // Served by the main process's hermit-file protocol.
+  fileUrl: (libraryPath) => `hermit-file://library/${libraryPath.split('/').map(encodeURIComponent).join('/')}`,
   listProjects: () => ipcRenderer.invoke('projects:list'),
   createProject: (name, folder) => ipcRenderer.invoke('projects:create', name, folder),
   renameProject: (projectId, name) => ipcRenderer.invoke('projects:rename', projectId, name),

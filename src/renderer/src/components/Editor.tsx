@@ -8,6 +8,7 @@ import { grammarChecker, type GrammarDialect } from '../editor/grammar'
 
 export interface EditorHandle {
   focus(): void
+  blur(): void
   run(command: Command): void
   openSearch(): void
   /** Swap in new text (e.g. pulled from GitHub) without moving the caret more than needed. */
@@ -28,6 +29,8 @@ interface Props {
   fontKey: string
   hidden?: boolean
   readOnly?: boolean
+  /** Put the caret in the text whenever a sheet loads. */
+  autoFocus?: boolean
   onChange(doc: Text): void
   ref?: Ref<EditorHandle>
 }
@@ -45,6 +48,7 @@ export function Editor({
   fontKey,
   hidden,
   readOnly = false,
+  autoFocus = true,
   onChange,
   ref
 }: Props) {
@@ -59,15 +63,16 @@ export function Editor({
   const formatSlot = useRef(new Compartment())
   // Suggestions can't be applied to a read-only sheet, so don't offer them.
   const checking = readOnly ? null : grammar
-  const modes = useRef({ format, focus, typewriter, readOnly, checking })
+  const modes = useRef({ format, focus, typewriter, readOnly, checking, autoFocus })
 
   useEffect(() => {
     onChangeRef.current = onChange
-    modes.current = { format, focus, typewriter, readOnly, checking }
+    modes.current = { format, focus, typewriter, readOnly, checking, autoFocus }
   })
 
   useImperativeHandle(ref, () => ({
     focus: () => view.current?.focus(),
+    blur: () => view.current?.contentDOM.blur(),
     run: (command) => {
       if (view.current) command(view.current)
     },
@@ -138,7 +143,7 @@ export function Editor({
     requestAnimationFrame(() => {
       v.scrollDOM.scrollTop = saved?.scrollTop ?? 0
       if (!saved) v.dispatch({ effects: EditorView.scrollIntoView(v.state.selection.main.head, { yMargin: 80 }) })
-      v.focus()
+      if (modes.current.autoFocus) v.focus()
     })
   }, [docKey, content])
 

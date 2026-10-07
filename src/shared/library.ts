@@ -1,7 +1,3 @@
-import { shell } from 'electron'
-import { randomBytes } from 'node:crypto'
-import { promises as fs } from 'node:fs'
-import path from 'node:path'
 import type {
   ContentFormat,
   Outline,
@@ -12,8 +8,8 @@ import type {
   Sheet,
   SheetPlace,
   SheetSummary
-} from '../shared/types'
-import { countWords, summarize } from '../shared/text'
+} from './types'
+import { countWords, summarize } from './text'
 import {
   canvasText,
   canvasTitle,
@@ -25,7 +21,7 @@ import {
   serializeCanvas,
   sheetFile,
   summarizeCanvas
-} from '../shared/canvas'
+} from './canvas'
 
 /**
  * A library is a plain folder. Every sub-folder is a project and every `.md`
@@ -53,6 +49,33 @@ import {
  * `.archive/Notes/<name>`. The library's archive, at its top, keeps each project's
  * folders: `.archive/Fiction/My Novel`.
  */
+
+export interface DirEntry {
+  name: string
+  isFile: boolean
+  isDirectory: boolean
+}
+
+/**
+ * The file operations a library needs: Node's in the desktop app, the native side's on iOS.
+ * Paths are absolute and separated by `/`. A missing file fails with an error whose `code` is `ENOENT`.
+ */
+export interface LibraryFs {
+  readText(file: string): Promise<string>
+  /** Writes via a temporary file and a rename, so a crash never leaves a half-written file. */
+  writeText(file: string, content: string): Promise<void>
+  writeBytes(file: string, data: Uint8Array): Promise<void>
+  readdir(dir: string): Promise<DirEntry[]>
+  /** When the file last changed, in milliseconds. */
+  mtime(file: string): Promise<number>
+  exists(file: string): Promise<boolean>
+  mkdir(dir: string, recursive?: boolean): Promise<void>
+  rename(from: string, to: string): Promise<void>
+  /** Remove a file, or a folder and everything in it. Nothing happens if it's already gone. */
+  remove(file: string): Promise<void>
+  /** Move a file or folder to the trash, or where there's no trash, delete it. */
+  trash(file: string): Promise<void>
+}
 
 const META_FILE = '.hermit.json'
 const FOLDER_MARKER = '.hermit-folder'
@@ -93,6 +116,12 @@ export function sanitizeName(name: string, fallback = 'Untitled Project'): strin
 
 const join = (...parts: (string | null)[]) => parts.filter(Boolean).join('/')
 
+/** A path below an absolute one. */
+const under = (dir: string, ...parts: string[]) => [dir.replace(/\/+$/, ''), ...parts].join('/')
+
+/** The folder an absolute path is in. */
+const dirname = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')))
+
 /** The parent of a slash-separated path, or null at the top. */
 function parentPath(p: string): string | null {
   const i = p.lastIndexOf('/')
@@ -131,7 +160,8 @@ const sheetIdIn = (place: SheetPlace, name: string) => join(folderOf(place), nam
 
 /** A fresh sheet id in a folder of the project. */
 function newSheetId(folder: string): string {
-  return join(folder, `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`)
+  const random = [...crypto.getRandomValues(new Uint8Array(3))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return join(folder, `${Date.now().toString(36)}-${random}`)
 }
 
 const isNotesFolder = (folder: string) => originalPath(folder).split('/')[0] === NOTES_DIR
@@ -152,57 +182,6 @@ const within = (place: SheetPlace, folder: SheetPlace) =>
   place.section === folder.section &&
   folder.subsection !== null &&
   (place.subsection === folder.subsection || Boolean(place.subsection?.startsWith(`${folder.subsection}/`)))
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Turn a permission error into one that says how to fix it; macOS privacy settings can block the library. */
-function explainAccess(err: unknown, dir: string): unknown {
-  const code = (err as NodeJS.ErrnoException).code
-  if (code !== 'EPERM' && code !== 'EACCES') return err
-  const fix =
-    process.platform === 'darwin'
-      ? 'Allow it under System Settings → Privacy & Security → Files & Folders, then reopen the app.'
-      : "Check the folder's permissions."
-  return new Error(`Hermit Crab isn't allowed to read “${dir}”. ${fix}`)
-}
-
-/** Remove a folder if nothing but empty folders and markers is left in it. Resolves with whether it went. */
-async function removeIfHollow(dir: string): Promise<boolean> {
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => null)
-  if (!entries) return true
-  for (const e of entries) {
-    const hollow = e.isDirectory() ? await removeIfHollow(path.join(dir, e.name)) : CLUTTER.includes(e.name)
-    if (!hollow) return false
-  }
-  await fs.rm(dir, { recursive: true, force: true })
-  return true
-}
-
-/** Tidy an archive after something leaves it: remove `dir`, and the folders above it up to `top`, while only markers are left in them. */
-async function pruneArchive(dir: string, top: string): Promise<void> {
-  for (let d = dir; ; d = path.dirname(d)) {
-    const rel = path.relative(top, d)
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return
-    const entries = await fs.readdir(d).catch(() => null)
-    if (entries?.some((name) => !CLUTTER.includes(name))) return
-    if (entries) await fs.rm(d, { recursive: true, force: true })
-    if (!rel) return
-  }
-}
-
-/** Write via a temp file + rename so a crash never leaves a half-written sheet. */
-async function writeAtomic(file: string, content: string): Promise<void> {
-  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomBytes(4).toString('hex')}.tmp`)
-  await fs.writeFile(tmp, content, 'utf8')
-  await fs.rename(tmp, file)
-}
 
 /** `format` is the project's; notes are always Markdown. */
 function toSummary(id: string, content: string, updatedAt: number, format: ContentFormat): SheetSummary {
@@ -241,20 +220,49 @@ export interface CompiledDocument {
 type ScannedOutline = Outline & { keys: string[]; settings: ProjectSettings }
 
 export class Library {
-  constructor(public readonly root: string) {}
+  constructor(
+    public readonly root: string,
+    private readonly fs: LibraryFs
+  ) {}
 
   async ensure(): Promise<boolean> {
-    const existed = await exists(this.root)
-    await fs.mkdir(this.root, { recursive: true })
+    const existed = await this.fs.exists(this.root)
+    await this.fs.mkdir(this.root, true)
     return existed
   }
 
   /** A project's or folder's directory, from its path in the library. */
-  private libraryDir(libraryPath: string): string {
+  libraryDir(libraryPath: string): string {
     const parts = libraryPath.split('/')
     // The archive is the one hidden folder a path can go through.
     parts.forEach((part, i) => (i === 0 && part === ARCHIVE_DIR) || assertSafeName(part))
-    return path.join(this.root, ...parts)
+    return under(this.root, ...parts)
+  }
+
+  private exists(p: string): Promise<boolean> {
+    return this.fs.exists(p)
+  }
+
+  /** Remove a folder if nothing but empty folders and markers is left in it. Resolves with whether it went. */
+  private async removeIfHollow(dir: string): Promise<boolean> {
+    const entries = await this.fs.readdir(dir).catch(() => null)
+    if (!entries) return true
+    for (const e of entries) {
+      const hollow = e.isDirectory ? await this.removeIfHollow(under(dir, e.name)) : CLUTTER.includes(e.name)
+      if (!hollow) return false
+    }
+    await this.fs.remove(dir)
+    return true
+  }
+
+  /** Tidy an archive after something leaves it: remove `dir`, and the folders above it up to `top`, while only markers are left in them. */
+  private async pruneArchive(dir: string, top: string): Promise<void> {
+    for (let d = dir; d === top || d.startsWith(`${top}/`); d = dirname(d)) {
+      const entries = await this.fs.readdir(d).catch(() => null)
+      if (entries?.some((e) => !CLUTTER.includes(e.name))) return
+      if (entries) await this.fs.remove(d)
+      if (d === top) return
+    }
   }
 
   private projectDir(projectId: string): string {
@@ -262,7 +270,7 @@ export class Library {
   }
 
   private folderDir(projectId: string, folder: string): string {
-    return path.join(this.projectDir(projectId), ...(folder ? folder.split('/') : []))
+    return under(this.projectDir(projectId), ...(folder ? folder.split('/') : []))
   }
 
   private placeDir(projectId: string, place: SheetPlace): string {
@@ -277,7 +285,7 @@ export class Library {
 
   private sheetPath(projectId: string, sheetId: string): string {
     locate(sheetId)
-    return path.join(this.projectDir(projectId), sheetFile(sheetId))
+    return under(this.projectDir(projectId), sheetFile(sheetId))
   }
 
   /** An id like `sheetId`, in the project's `folder`, that no file is using. Canvases keep their name, numbered. */
@@ -285,17 +293,17 @@ export class Library {
     const name = locate(sheetId).name
     let target = join(folder, name)
     if (!isCanvasId(sheetId)) {
-      while (await exists(this.sheetPath(projectId, target))) target = newSheetId(folder)
+      while (await this.exists(this.sheetPath(projectId, target))) target = newSheetId(folder)
       return target
     }
     const base = name.slice(0, -CANVAS_EXT.length)
-    for (let n = 2; await exists(this.sheetPath(projectId, target)); n++) target = join(folder, `${base} ${n}${CANVAS_EXT}`)
+    for (let n = 2; await this.exists(this.sheetPath(projectId, target)); n++) target = join(folder, `${base} ${n}${CANVAS_EXT}`)
     return target
   }
 
   private async readMeta(projectId: string): Promise<ProjectMeta> {
     try {
-      const raw = await fs.readFile(path.join(this.projectDir(projectId), META_FILE), 'utf8')
+      const raw = await this.fs.readText(under(this.projectDir(projectId), META_FILE))
       const meta = JSON.parse(raw) as Partial<ProjectMeta>
       return {
         settings: normalizeProjectSettings(meta.settings),
@@ -309,7 +317,7 @@ export class Library {
   /** Change part of the meta file, keeping the rest as it is. */
   private async writeMeta(projectId: string, patch: Partial<ProjectMeta>): Promise<void> {
     const meta = { ...(await this.readMeta(projectId)), ...patch }
-    await writeAtomic(path.join(this.projectDir(projectId), META_FILE), JSON.stringify(meta, null, 2))
+    await this.fs.writeText(under(this.projectDir(projectId), META_FILE), JSON.stringify(meta, null, 2))
   }
 
   private async formatOf(projectId: string): Promise<ContentFormat> {
@@ -321,7 +329,7 @@ export class Library {
     const base = sanitizeName(name, fallback)
     let candidate = base
     const isSelf = (c: string) => c.toLowerCase() === except?.toLowerCase()
-    for (let n = 2; !isSelf(candidate) && (await exists(this.libraryDir(join(folder, candidate)))); n++) {
+    for (let n = 2; !isSelf(candidate) && (await this.exists(this.libraryDir(join(folder, candidate)))); n++) {
       candidate = `${base} ${n}`
     }
     return join(folder, candidate)
@@ -334,17 +342,15 @@ export class Library {
     const found = { projects: [] as string[], folders: [] as string[], archived: [] as string[] }
     const visit = async (folder: string | null, archived: boolean): Promise<void> => {
       const dir = folder ? this.libraryDir(folder) : this.root
-      const entries = await fs.readdir(dir, { withFileTypes: true }).catch((err) => {
-        throw explainAccess(err, dir)
-      })
+      const entries = await this.fs.readdir(dir)
       await Promise.all(
         entries
-          .filter((e) => e.isDirectory() && (!e.name.startsWith('.') || (!folder && e.name === ARCHIVE_DIR)))
+          .filter((e) => e.isDirectory && (!e.name.startsWith('.') || (!folder && e.name === ARCHIVE_DIR)))
           .map(async (e) => {
             const child = join(folder, e.name)
             if (child === ARCHIVE_DIR) {
               await visit(child, true)
-            } else if (await exists(path.join(dir, e.name, FOLDER_MARKER))) {
+            } else if (await this.exists(under(dir, e.name, FOLDER_MARKER))) {
               // Folders in the archive only hold archived projects; they aren't folders to file things in.
               if (!archived) found.folders.push(child)
               await visit(child, archived)
@@ -378,7 +384,7 @@ export class Library {
     const archived = isArchived(projectId)
     const { sheets, settings } = await this.scan(projectId)
     const content = sheets.filter((s) => s.section === 'content')
-    const stat = await fs.stat(this.projectDir(projectId))
+    const mtime = await this.fs.mtime(this.projectDir(projectId))
     return {
       id: projectId,
       name: lastSegment(projectId),
@@ -387,7 +393,7 @@ export class Library {
       archived,
       sheetCount: content.length,
       wordCount: content.reduce((sum, s) => sum + s.wordCount, 0),
-      updatedAt: Math.max(stat.mtimeMs, ...sheets.map((s) => s.updatedAt)),
+      updatedAt: Math.max(mtime, ...sheets.map((s) => s.updatedAt)),
       settings
     }
   }
@@ -400,34 +406,34 @@ export class Library {
 
   async createProject(name: string, folder: string | null = null): Promise<ProjectSummary> {
     const id = await this.uniqueLibraryPath(folder, name, 'Untitled Project')
-    await fs.mkdir(this.projectDir(id))
+    await this.fs.mkdir(this.projectDir(id))
     await this.writeMeta(id, { order: [] })
     return this.projectSummary(id)
   }
 
   async renameProject(projectId: string, name: string): Promise<ProjectSummary> {
     const id = await this.uniqueLibraryPath(parentPath(projectId), name, 'Untitled Project', lastSegment(projectId))
-    if (id !== projectId) await fs.rename(this.projectDir(projectId), this.projectDir(id))
+    if (id !== projectId) await this.fs.rename(this.projectDir(projectId), this.projectDir(id))
     return this.projectSummary(id)
   }
 
   async createFolder(name: string, parent: string | null = null): Promise<string> {
     const folder = await this.uniqueLibraryPath(parent, name, 'Untitled Folder')
-    await fs.mkdir(this.libraryDir(folder))
-    await fs.writeFile(path.join(this.libraryDir(folder), FOLDER_MARKER), '')
+    await this.fs.mkdir(this.libraryDir(folder))
+    await this.fs.writeText(under(this.libraryDir(folder), FOLDER_MARKER), '')
     return folder
   }
 
   /** Rename a folder, which changes the ids of every project in it. Returns its new path. */
   async renameFolder(folder: string, name: string): Promise<string> {
     const next = await this.uniqueLibraryPath(parentPath(folder), name, 'Untitled Folder', lastSegment(folder))
-    if (next !== folder) await fs.rename(this.libraryDir(folder), this.libraryDir(next))
+    if (next !== folder) await this.fs.rename(this.libraryDir(folder), this.libraryDir(next))
     return next
   }
 
   /** Moves the folder and every project in it to the trash. */
   async deleteFolder(folder: string): Promise<void> {
-    await shell.trashItem(this.libraryDir(folder))
+    await this.fs.trash(this.libraryDir(folder))
   }
 
   /** Move a project or folder into another folder, or to the top of the library with null. Returns its new path. */
@@ -436,12 +442,12 @@ export class Library {
     if (parentPath(libraryPath) === folder) return libraryPath
     const name = lastSegment(libraryPath)
     const target = await this.uniqueLibraryPath(folder, name, name)
-    await fs.rename(this.libraryDir(libraryPath), this.libraryDir(target))
+    await this.fs.rename(this.libraryDir(libraryPath), this.libraryDir(target))
     return target
   }
 
   async deleteProject(projectId: string): Promise<void> {
-    await shell.trashItem(this.projectDir(projectId))
+    await this.fs.trash(this.projectDir(projectId))
     if (isArchived(projectId)) await this.pruneLibraryArchive(projectId)
   }
 
@@ -456,10 +462,10 @@ export class Library {
     for (const name of folder?.split('/') ?? []) {
       const next = join(at, name)
       const dir = this.libraryDir(next)
-      if (!(await exists(dir))) {
-        await fs.mkdir(dir)
-        await fs.writeFile(path.join(dir, FOLDER_MARKER), '')
-      } else if (!(await exists(path.join(dir, FOLDER_MARKER)))) {
+      if (!(await this.exists(dir))) {
+        await this.fs.mkdir(dir)
+        await this.fs.writeText(under(dir, FOLDER_MARKER), '')
+      } else if (!(await this.exists(under(dir, FOLDER_MARKER)))) {
         break
       }
       at = next
@@ -471,10 +477,10 @@ export class Library {
   async archiveProject(projectId: string): Promise<string> {
     if (isArchived(projectId)) return projectId
     const name = lastSegment(projectId)
-    await fs.mkdir(this.libraryDir(ARCHIVE_DIR), { recursive: true })
+    await this.fs.mkdir(this.libraryDir(ARCHIVE_DIR), true)
     const folder = await this.ensureFolders(ARCHIVE_DIR, parentPath(projectId))
     const target = await this.uniqueLibraryPath(folder, name, name)
-    await fs.rename(this.projectDir(projectId), this.projectDir(target))
+    await this.fs.rename(this.projectDir(projectId), this.projectDir(target))
     return target
   }
 
@@ -484,18 +490,14 @@ export class Library {
     const name = lastSegment(projectId)
     const folder = await this.ensureFolders(null, parentPath(originalPath(projectId)))
     const target = await this.uniqueLibraryPath(folder, name, name)
-    await fs.rename(this.projectDir(projectId), this.projectDir(target))
+    await this.fs.rename(this.projectDir(projectId), this.projectDir(target))
     await this.pruneLibraryArchive(projectId)
     return target
   }
 
   /** Clear away the archive's folders that held a project, now it's gone, while they're empty. */
   private async pruneLibraryArchive(projectId: string): Promise<void> {
-    await pruneArchive(path.dirname(this.projectDir(projectId)), this.libraryDir(ARCHIVE_DIR))
-  }
-
-  revealProject(projectId: string): void {
-    shell.showItemInFolder(this.projectDir(projectId))
+    await this.pruneArchive(dirname(this.projectDir(projectId)), this.libraryDir(ARCHIVE_DIR))
   }
 
   // ── Outline ───────────────────────────────────────────────────────────────
@@ -510,24 +512,24 @@ export class Library {
     const node: Folder = { path: folder, sheets: [], folders: [] }
     found.set(folder, node)
     const dir = this.folderDir(projectId, folder)
-    const entries = await fs.readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+    const entries = await this.fs.readdir(dir).catch((err: { code?: string }) => {
       // The notes folder appears only once something is put in it.
       if (err.code === 'ENOENT' && folder) return []
       throw err
     })
     // Canvases belong with the notes; the content is only Markdown.
     const isSheet = (name: string) => name.endsWith('.md') || (isNotesFolder(folder) && name.endsWith(CANVAS_EXT))
-    const files = entries.filter((e) => e.isFile() && isSheet(e.name) && !e.name.startsWith('.'))
+    const files = entries.filter((e) => e.isFile && isSheet(e.name) && !e.name.startsWith('.'))
     const dirs = entries.filter(
-      (e) => e.isDirectory() && !e.name.startsWith('.') && (folder || !RESERVED_DIRS.includes(e.name))
+      (e) => e.isDirectory && !e.name.startsWith('.') && (folder || !RESERVED_DIRS.includes(e.name))
     )
     ;[node.sheets, node.folders] = await Promise.all([
       Promise.all(
         files.map(async (e) => {
-          const file = path.join(dir, e.name)
-          const [content, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
+          const file = under(dir, e.name)
+          const [content, mtime] = await Promise.all([this.fs.readText(file), this.fs.mtime(file)])
           const name = e.name.endsWith('.md') ? e.name.slice(0, -3) : e.name
-          return toSummary(join(folder, name), content, stat.mtimeMs, format)
+          return toSummary(join(folder, name), content, mtime, format)
         })
       ),
       Promise.all(dirs.map((e) => this.readFolder(projectId, join(folder, e.name), format, found)))
@@ -621,8 +623,8 @@ export class Library {
     if (samePlace(from, to)) return sheetId
     if (isCanvasId(sheetId) && to.section !== 'notes') throw new Error('Canvases live in the notes.')
     const target = await this.freeSheetId(projectId, folderOf(to), sheetId)
-    await fs.mkdir(this.placeDir(projectId, to), { recursive: true })
-    await fs.rename(this.sheetPath(projectId, sheetId), this.sheetPath(projectId, target))
+    await this.fs.mkdir(this.placeDir(projectId, to), true)
+    await this.fs.rename(this.sheetPath(projectId, sheetId), this.sheetPath(projectId, target))
     return target
   }
 
@@ -635,11 +637,11 @@ export class Library {
   ): Promise<{ keys: string[]; renamed: Record<string, string> }> {
     const fromDir = this.placeDir(projectId, from)
     const toDir = this.placeDir(projectId, to)
-    if (await exists(fromDir)) {
-      await fs.mkdir(path.dirname(toDir), { recursive: true })
-      await fs.rename(fromDir, toDir)
+    if (await this.exists(fromDir)) {
+      await this.fs.mkdir(dirname(toDir), true)
+      await this.fs.rename(fromDir, toDir)
     } else {
-      await fs.mkdir(toDir, { recursive: true })
+      await this.fs.mkdir(toDir, true)
     }
     const fromPrefix = `${folderOf(from)}/`
     const toPrefix = `${folderOf(to)}/`
@@ -721,12 +723,16 @@ export class Library {
 
   async readSheet(projectId: string, sheetId: string): Promise<Sheet> {
     const file = this.sheetPath(projectId, sheetId)
-    const [content, stat, format] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file), this.formatOf(projectId)])
-    return { ...toSummary(sheetId, content, stat.mtimeMs, format), content }
+    const [content, mtime, format] = await Promise.all([
+      this.fs.readText(file),
+      this.fs.mtime(file),
+      this.formatOf(projectId)
+    ])
+    return { ...toSummary(sheetId, content, mtime, format), content }
   }
 
   async writeSheet(projectId: string, sheetId: string, content: string): Promise<SheetSummary> {
-    await writeAtomic(this.sheetPath(projectId, sheetId), content)
+    await this.fs.writeText(this.sheetPath(projectId, sheetId), content)
     return toSummary(sheetId, content, Date.now(), await this.formatOf(projectId))
   }
 
@@ -738,8 +744,8 @@ export class Library {
     place: SheetPlace = { section: 'content', subsection: null }
   ): Promise<Sheet> {
     const id = newSheetId(folderOf(place))
-    await fs.mkdir(this.placeDir(projectId, place), { recursive: true })
-    await writeAtomic(this.sheetPath(projectId, id), content)
+    await this.fs.mkdir(this.placeDir(projectId, place), true)
+    await this.fs.writeText(this.sheetPath(projectId, id), content)
     const keys = (await this.scan(projectId)).keys.filter((k) => k !== id)
     const at = afterId ? keys.indexOf(afterId) : -1
     const order = at === -1 ? [...keys, id] : [...keys.slice(0, at + 1), id, ...keys.slice(at + 1)]
@@ -749,8 +755,8 @@ export class Library {
 
   async deleteSheet(projectId: string, sheetId: string): Promise<void> {
     const file = this.sheetPath(projectId, sheetId)
-    await shell.trashItem(file)
-    if (isArchived(sheetId)) await pruneArchive(path.dirname(file), this.archiveDir(projectId))
+    await this.fs.trash(file)
+    if (isArchived(sheetId)) await this.pruneArchive(dirname(file), this.archiveDir(projectId))
     const meta = await this.readMeta(projectId)
     await this.writeMeta(projectId, { order: meta.order.filter((id) => id !== sheetId) })
   }
@@ -761,8 +767,8 @@ export class Library {
     if (isArchived(sheetId)) throw new Error('Restore it from the archive first.')
     const place = locate(sheetId)
     const target = await this.freeSheetId(toProject, folderOf(place), sheetId)
-    await fs.mkdir(this.placeDir(toProject, place), { recursive: true })
-    await fs.rename(this.sheetPath(fromProject, sheetId), this.sheetPath(toProject, target))
+    await this.fs.mkdir(this.placeDir(toProject, place), true)
+    await this.fs.rename(this.sheetPath(fromProject, sheetId), this.sheetPath(toProject, target))
 
     const from = await this.readMeta(fromProject)
     await this.writeMeta(fromProject, { order: from.order.filter((id) => id !== sheetId) })
@@ -778,7 +784,7 @@ export class Library {
     const sheets = [...live, ...archived]
     const hits = await Promise.all(
       sheets.map(async (s) => {
-        const content = await fs.readFile(this.sheetPath(projectId, s.id), 'utf8')
+        const content = await this.fs.readText(this.sheetPath(projectId, s.id))
         const text = searchableText(s.id, content).toLocaleLowerCase()
         return terms.every((t) => text.includes(t)) ? s.id : null
       })
@@ -792,7 +798,7 @@ export class Library {
   async createSubsection(projectId: string, parent: SheetPlace, name: string): Promise<SheetPlace> {
     const unique = await this.uniqueSubsection(projectId, parent, name)
     const place = { section: parent.section, subsection: join(parent.subsection, unique) }
-    await fs.mkdir(this.placeDir(projectId, place), { recursive: true })
+    await this.fs.mkdir(this.placeDir(projectId, place), true)
     const { keys } = await this.scan(projectId)
     const key = `${folderOf(place)}/`
     await this.writeMeta(projectId, { order: [...keys.filter((k) => k !== key), key] })
@@ -817,7 +823,7 @@ export class Library {
   async deleteSubsection(projectId: string, place: SheetPlace): Promise<void> {
     if (!place.subsection) throw new Error('Not a subsection.')
     const dir = this.placeDir(projectId, place)
-    if (await exists(dir)) await shell.trashItem(dir)
+    if (await this.exists(dir)) await this.fs.trash(dir)
     const prefix = `${folderOf(place)}/`
     const meta = await this.readMeta(projectId)
     await this.writeMeta(projectId, { order: meta.order.filter((key) => !key.startsWith(prefix)) })
@@ -826,7 +832,7 @@ export class Library {
   // ── The project's archive ─────────────────────────────────────────────────
 
   private archiveDir(projectId: string): string {
-    return path.join(this.projectDir(projectId), ARCHIVE_DIR)
+    return under(this.projectDir(projectId), ARCHIVE_DIR)
   }
 
   /**
@@ -841,13 +847,13 @@ export class Library {
     const renamed: Record<string, string> = {}
     for (const { id } of moving) {
       const target = await this.freeSheetId(projectId, join(ARCHIVE_DIR, parentPath(id)), id)
-      await fs.mkdir(path.dirname(this.sheetPath(projectId, target)), { recursive: true })
-      await fs.rename(this.sheetPath(projectId, id), this.sheetPath(projectId, target))
+      await this.fs.mkdir(dirname(this.sheetPath(projectId, target)), true)
+      await this.fs.rename(this.sheetPath(projectId, id), this.sheetPath(projectId, target))
       renamed[id] = target
     }
     // An archived subsection goes too, along with any empty subsections in it.
     const prefix = item.kind === 'subsection' ? `${folderOf(item)}/` : null
-    if (prefix) await removeIfHollow(this.placeDir(projectId, item))
+    if (prefix) await this.removeIfHollow(this.placeDir(projectId, item))
     const order = keys.filter((k) => !(k in renamed) && !(prefix && k.startsWith(prefix)))
     await this.writeMeta(projectId, { order: [...order, ...Object.values(renamed)] })
     return renamed
@@ -863,9 +869,9 @@ export class Library {
     const place = locate(original)
     const target = await this.freeSheetId(projectId, folderOf(place), original)
     const file = this.sheetPath(projectId, sheetId)
-    await fs.mkdir(this.placeDir(projectId, place), { recursive: true })
-    await fs.rename(file, this.sheetPath(projectId, target))
-    await pruneArchive(path.dirname(file), this.archiveDir(projectId))
+    await this.fs.mkdir(this.placeDir(projectId, place), true)
+    await this.fs.rename(file, this.sheetPath(projectId, target))
+    await this.pruneArchive(dirname(file), this.archiveDir(projectId))
     // A fresh scan lists the sheet last in its place, having no position yet; keep that.
     await this.writeMeta(projectId, { order: (await this.scan(projectId)).keys })
     // Canvases still point where it was; only a name clash moves it elsewhere.
@@ -885,8 +891,8 @@ export class Library {
   ): Promise<Sheet> {
     if (place.section !== 'notes') throw new Error('Canvases live in the notes.')
     const id = await this.freeSheetId(projectId, folderOf(place), sheetIdIn(place, `${sanitizeName(name, 'Untitled Canvas')}${CANVAS_EXT}`))
-    await fs.mkdir(this.placeDir(projectId, place), { recursive: true })
-    await writeAtomic(this.sheetPath(projectId, id), content)
+    await this.fs.mkdir(this.placeDir(projectId, place), true)
+    await this.fs.writeText(this.sheetPath(projectId, id), content)
     const keys = (await this.scan(projectId)).keys.filter((k) => k !== id)
     const at = afterId ? keys.indexOf(afterId) : -1
     const order = at === -1 ? [...keys, id] : [...keys.slice(0, at + 1), id, ...keys.slice(at + 1)]
@@ -903,7 +909,7 @@ export class Library {
     // Renaming only the case of a name mustn't count the canvas as clashing with itself.
     const target =
       wanted.toLowerCase() === sheetId.toLowerCase() ? wanted : await this.freeSheetId(projectId, folderOf(place), wanted)
-    await fs.rename(this.sheetPath(projectId, sheetId), this.sheetPath(projectId, target))
+    await this.fs.rename(this.sheetPath(projectId, sheetId), this.sheetPath(projectId, target))
     const meta = await this.readMeta(projectId)
     await this.writeMeta(projectId, { order: meta.order.map((k) => (k === sheetId ? target : k)) })
     const renamed = { [sheetId]: target }
@@ -920,8 +926,8 @@ export class Library {
       canvases.map(async ({ id }) => {
         const file = this.sheetPath(projectId, id)
         try {
-          const relinked = relinkCanvas(parseCanvas(await fs.readFile(file, 'utf8')), renamed)
-          if (relinked) await writeAtomic(file, serializeCanvas(relinked))
+          const relinked = relinkCanvas(parseCanvas(await this.fs.readText(file)), renamed)
+          if (relinked) await this.fs.writeText(file, serializeCanvas(relinked))
         } catch {
           // A canvas that can't be read (mid-merge, say) is left as it is.
         }
@@ -931,14 +937,14 @@ export class Library {
 
   /** Copy an image into the project's attachments. Returns its path within the project. */
   async saveAttachment(projectId: string, name: string, data: Uint8Array): Promise<string> {
-    const dir = path.join(this.projectDir(projectId), ATTACHMENTS_DIR)
-    await fs.mkdir(dir, { recursive: true })
+    const dir = under(this.projectDir(projectId), ATTACHMENTS_DIR)
+    await this.fs.mkdir(dir, true)
     const clean = sanitizeName(name, 'Image')
     const dot = clean.lastIndexOf('.')
     const [base, ext] = dot > 0 ? [clean.slice(0, dot), clean.slice(dot)] : [clean, '']
     let file = clean
-    for (let n = 2; await exists(path.join(dir, file)); n++) file = `${base} ${n}${ext}`
-    await fs.writeFile(path.join(dir, file), data)
+    for (let n = 2; await this.exists(under(dir, file)); n++) file = `${base} ${n}${ext}`
+    await this.fs.writeBytes(under(dir, file), data)
     return `${ATTACHMENTS_DIR}/${file}`
   }
 
@@ -950,7 +956,7 @@ export class Library {
     const { sheets, settings } = await this.scan(projectId)
     const ids = sheetIds ?? sheets.filter((s) => s.section === 'content').map((s) => s.id)
     const format = ids.every((id) => locate(id).section === 'content') ? settings.format : 'markdown'
-    const parts = await Promise.all(ids.map((id) => fs.readFile(this.sheetPath(projectId, id), 'utf8')))
+    const parts = await Promise.all(ids.map((id) => this.fs.readText(this.sheetPath(projectId, id))))
     const text = parts.map((p) => p.trim()).filter(Boolean).join('\n\n') + '\n'
     const title = sheetIds?.length === 1 ? summarize(parts[0], format).title || 'Untitled' : lastSegment(projectId)
     return { title, text, format }

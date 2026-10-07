@@ -2473,3 +2473,363 @@ button {
 :hover::-webkit-scrollbar-thumb {
   background-color: var(--border-strong);
 }
+
+/* ── iPhone and iPad ────────────────────────────────────────────────────── */
+
+/* Panes kept alive while out of sight, like the editor on a phone. */
+.pane[hidden] {
+  display: none;
+}
+
+.platform-ios {
+  /* The page runs under the status bar, home indicator and, in landscape, the camera. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.platform-ios .pane-header {
+  height: calc(52px + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+}
+
+.platform-ios .library-footer {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.platform-ios .sheet-list,
+.platform-ios .project-list {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.platform-ios .status-bar {
+  height: calc(30px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* The editor's toolbar floats over the text; start the text below it. */
+.platform-ios .editor-host .cm-editor .cm-scroller,
+.platform-ios .preview-scroller {
+  padding-top: calc(24px + env(safe-area-inset-top));
+}
+
+/* Bigger targets for fingers. */
+.platform-ios .icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.platform-ios .icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* No hover to bring the toolbar up, so it's always there. */
+.platform-ios .editor-toolbar .icon-button:not(:disabled) {
+  opacity: 0.8;
+}
+
+.platform-ios .project-item {
+  height: 44px;
+  font-size: 16px;
+}
+
+.platform-ios .library-folder,
+.platform-ios .library-archive-label,
+.platform-ios .library-empty {
+  height: 38px;
+  font-size: 13px;
+}
+
+.platform-ios .library-section-label {
+  font-size: 12px;
+}
+
+.platform-ios .project-count,
+.platform-ios .section-count,
+.platform-ios .subsection-count {
+  font-size: 13px;
+}
+
+.platform-ios .sheet-item {
+  padding: 12px 14px 11px;
+}
+
+.platform-ios .sheet-title {
+  font-size: 16px;
+}
+
+.platform-ios .sheet-excerpt {
+  font-size: 14px;
+}
+
+.platform-ios .sheet-meta {
+  font-size: 12px;
+}
+
+.platform-ios .subsection-header {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+/* There's no hovering to reveal it. */
+.platform-ios .subsection-add {
+  visibility: visible;
+  opacity: 1;
+}
+
+.platform-ios .section-tab {
+  height: 32px;
+  font-size: 14px;
+}
+
+.platform-ios .search-field {
+  height: 36px;
+  border-radius: 10px;
+}
+
+/* Sixteen pixels or more keeps iOS from zooming in on a field as it's focused. */
+.platform-ios input,
+.platform-ios select,
+.platform-ios textarea,
+.platform-ios .rename-field {
+  font-size: 16px;
+}
+
+.platform-ios .pane-title-name {
+  font-size: 15px;
+}
+
+.platform-ios .pane-title-meta {
+  font-size: 12px;
+}
+
+.platform-ios .ghost-button,
+.platform-ios .primary-button {
+  min-height: 40px;
+  font-size: 15px;
+}
+
+/* ── Phone ── */
+
+.compact .library,
+.compact .sheets {
+  flex: 1;
+  width: auto;
+  border-right: none;
+}
+
+.compact .library > .pane-header {
+  padding-left: 16px;
+}
+
+.back-button {
+  flex: none;
+  margin-left: -8px;
+  color: var(--accent) !important;
+}
+
+.compact .sheets > .pane-header {
+  padding-left: 12px;
+}
+
+.compact .editor-toolbar {
+  padding-left: 12px;
+}
+
+.compact .place-label {
+  max-width: 50%;
+}
+
+.compact .editor-host .cm-content {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+/* Settings and the merge editor fill the screen. */
+.compact .settings-backdrop {
+  padding: 0;
+}
+
+/* The tabs get a row of their own under the title. */
+.compact .settings-header {
+  flex-wrap: wrap;
+  row-gap: 10px;
+  padding-left: 18px;
+}
+
+.compact .settings-tabs {
+  order: 1;
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.compact .settings-tabs button {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 14px;
+}
+
+.compact .settings-body {
+  padding: 6px 18px 22px;
+}
+
+.compact .settings,
+.compact .merge {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.compact .merge-body {
+  flex-direction: column;
+  min-height: 0;
+}
+
+.compact .merge-main {
+  min-height: 0;
+}
+
+.compact .merge-files {
+  width: auto;
+  max-height: 30%;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.compact .hunk-sides {
+  grid-template-columns: 1fr;
+}
+
+/* The conflicts above the result, rather than beside it. */
+.compact .merge-panes {
+  flex-direction: column;
+}
+
+.compact .merge-hunks {
+  flex: none;
+  max-height: 55%;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.compact .merge-result {
+  min-height: 0;
+}
+
+.compact .merge-toolbar {
+  flex-wrap: wrap;
+  padding: 6px 10px;
+}
+
+.compact .merge-toolbar .ghost-button {
+  min-height: 34px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.compact .merge-footer {
+  flex-wrap: wrap;
+}
+
+.compact .merge-footer > span {
+  flex: 1 0 100%;
+}
+
+/* Formatting above the on-screen keyboard. */
+.format-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 48px;
+  padding: 0 6px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sheets);
+}
+
+.format-bar-scroll {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.format-bar-divider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  margin: 0 6px;
+  background: var(--border-strong);
+}
+
+.format-bar .icon-button {
+  flex: none;
+  color: var(--text);
+}
+
+.library-location {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.sync-token-saved {
+  flex: 1;
+  color: var(--text-soft);
+}
+
+/* Canvases by touch: handles big enough for a fingertip, and the toolbar clear of the home indicator. */
+.platform-ios .canvas-handle {
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+}
+
+.platform-ios .canvas-resize {
+  right: -9px;
+  bottom: -9px;
+  width: 22px;
+  height: 22px;
+}
+
+.platform-ios .canvas-toolbar {
+  bottom: calc(14px + env(safe-area-inset-bottom));
+}
+
+.compact .canvas-toolbar,
+.compact .canvas-floating {
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+}
+
+.compact .canvas-toolbar .icon-button,
+.compact .canvas-floating .icon-button {
+  width: 34px;
+  height: 34px;
+}
+
+.compact .canvas-zoom {
+  display: none;
+}
+
+/* Grammar suggestions, opened by tapping an underlined word. */
+.platform-ios .cm-diagnostic {
+  font-size: 15px !important;
+}
+
+.platform-ios .cm-diagnosticAction {
+  min-height: 34px;
+  padding: 4px 14px !important;
+  font-size: 15px !important;
+}

@@ -61,6 +61,7 @@ import {
 } from './Icons'
 import { SHEET_DRAG_TYPE } from './LibraryPane'
 import { renderMarkdown } from './Preview'
+import { touch } from '../device'
 
 const hermit = window.hermit
 
@@ -93,6 +94,7 @@ type Gesture =
   | { kind: 'move'; start: Point; origins: Map<string, Point>; lead: string; moved: boolean }
   | { kind: 'resize'; id: string; start: Point; origin: Rect }
   | { kind: 'connect'; from: string; side: CanvasSide }
+  | { kind: 'pinch'; distance: number; middle: Point; view: View }
 
 /** A connection being drawn: from a card's side to wherever the pointer is. */
 interface Link {
@@ -121,9 +123,8 @@ const isHeading = (text: string) => /^#{1,6}\s+\S[^\n]*$/.test(text.trim())
 const colorStyle = (color?: CanvasColor): CSSProperties =>
   (color ? { '--card': /^\d$/.test(color) ? `var(--canvas-${color})` : color } : {}) as CSSProperties
 
-/** Where a library file is served from, for images. */
-const fileUrl = (projectId: string, file: string) =>
-  `hermit-file://library/${[...projectId.split('/'), ...file.split('/')].map(encodeURIComponent).join('/')}`
+/** Where a project's file is served from, for images. */
+const fileUrl = (projectId: string, file: string) => hermit.fileUrl(`${projectId}/${file}`)
 
 function loadViews(): Record<string, View> {
   try {
@@ -198,6 +199,11 @@ export function CanvasView(props: Props) {
   const before = useRef<CanvasData | null>(null)
   // A card made to be typed into; it's dropped again if left empty.
   const fresh = useRef<string | null>(null)
+  // Fingers on the canvas, by pointer id, for pinching.
+  const fingers = useRef(new Map<number, Point>())
+  // The last tap, to tell a double-tap; and when a finger last touched, so the browser's own dblclick is ignored.
+  const lastTap = useRef<{ at: number; point: Point; target: string } | null>(null)
+  const lastTouch = useRef(0)
 
   const sheetsById = useMemo(() => new Map(props.sheets.map((s) => [s.id, s])), [props.sheets])
   const nodesById = useMemo(() => new Map(canvas.nodes.map((n) => [n.id, n])), [canvas.nodes])
@@ -471,8 +477,48 @@ export function CanvasView(props: Props) {
 
   // ── Pointer gestures ──────────────────────────────────────────────────────
 
+  /** Track a finger. A second one turns whatever the first was doing into a pinch. Resolves with whether it did. */
+  const fingerDown = (e: ReactPointerEvent): boolean => {
+    if (e.pointerType !== 'touch') return false
+    lastTouch.current = Date.now()
+    fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (fingers.current.size !== 2) return false
+    const g = gesture.current
+    if (g?.kind === 'move' && g.moved) end()
+    if (g?.kind === 'connect') {
+      linkRef.current = null
+      setLink(null)
+    }
+    setMarquee(null)
+    const [a, b] = [...fingers.current.values()]
+    const r = host.current!.getBoundingClientRect()
+    gesture.current = {
+      kind: 'pinch',
+      distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+      middle: { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top },
+      view: viewRef.current
+    }
+    return true
+  }
+
+  /** Whether this tap follows another in the same place closely enough to count as a double-tap. */
+  const isDoubleTap = (e: PointerEvent, target: string): boolean => {
+    if (e.pointerType !== 'touch') return false
+    const now = Date.now()
+    const point = { x: e.clientX, y: e.clientY }
+    const last = lastTap.current
+    const double =
+      last !== null && last.target === target && now - last.at < 350 && Math.hypot(point.x - last.point.x, point.y - last.point.y) < 30
+    lastTap.current = double ? null : { at: now, point, target }
+    return double
+  }
+
+  /** The browser's own double-click, unless it comes from a finger, whose double-taps are handled above. */
+  const fromMouse = () => Date.now() - lastTouch.current > 800
+
   const onBackgroundDown = (e: ReactPointerEvent) => {
     setPicker(false)
+    if (fingerDown(e)) return
     if (e.button === 1 || (e.button === 0 && !e.shiftKey)) {
       gesture.current = { kind: 'pan', start: { x: e.clientX, y: e.clientY }, view: viewRef.current, moved: e.button === 1 }
     } else if (e.button === 0) {
@@ -483,6 +529,7 @@ export function CanvasView(props: Props) {
   const onNodeDown = (e: ReactPointerEvent, node: CanvasNode) => {
     if (e.button !== 0) return
     e.stopPropagation()
+    if (fingerDown(e)) return
     setPicker(false)
     setSelectedEdge(null)
     if (editing === node.id) return
@@ -523,9 +570,19 @@ export function CanvasView(props: Props) {
   }
 
   const onPointerMove = (e: PointerEvent) => {
+    if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const g = gesture.current
     if (!g) return
-    if (g.kind === 'pan') {
+    if (g.kind === 'pinch') {
+      if (fingers.current.size < 2) return
+      const [a, b] = [...fingers.current.values()]
+      const r = host.current!.getBoundingClientRect()
+      const middle = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top }
+      const zoom = clampZoom((g.view.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / g.distance)
+      // Keep the point that was between the fingers between them, wherever they go.
+      const world = { x: (g.middle.x - g.view.x) / g.view.zoom, y: (g.middle.y - g.view.y) / g.view.zoom }
+      setView({ zoom, x: middle.x - world.x * zoom, y: middle.y - world.y * zoom })
+    } else if (g.kind === 'pan') {
       const dx = e.clientX - g.start.x
       const dy = e.clientY - g.start.y
       if (!g.moved && Math.hypot(dx, dy) < 3) return
@@ -571,18 +628,31 @@ export function CanvasView(props: Props) {
   }
 
   const onPointerUp = (e: PointerEvent) => {
+    fingers.current.delete(e.pointerId)
     const g = gesture.current
+    // A pinch lasts until the last finger lifts, so the one left behind doesn't start a pan.
+    if (g?.kind === 'pinch') {
+      if (!fingers.current.size) gesture.current = null
+      return
+    }
     gesture.current = null
     if (!g) return
     if (g.kind === 'pan' && !g.moved) {
-      // A click on empty space.
+      // A click on empty space; tapped twice, a new card.
       setSelected(new Set())
       setSelectedEdge(null)
+      if (isDoubleTap(e, '') && editable) addCard(toWorld(e.clientX, e.clientY))
     } else if (g.kind === 'select') {
       setMarquee(null)
     } else if (g.kind === 'move') {
       if (g.moved) end()
       else if (!e.shiftKey && selected.size > 1) setSelected(new Set([g.lead]))
+      // Tapped twice, a card opens for editing, as a double-click does.
+      if (!g.moved && isDoubleTap(e, g.lead)) {
+        const node = nodesById.get(g.lead)
+        if (node?.type === 'text') startEditing(node.id)
+        else if (node) openFile(node)
+      }
     } else if (g.kind === 'resize') {
       end()
     } else if (g.kind === 'connect') {
@@ -645,10 +715,12 @@ export function CanvasView(props: Props) {
     const el = host.current!
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
     el.addEventListener('wheel', wheel, { passive: false })
     return () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
       el.removeEventListener('wheel', wheel)
     }
   }, [])
@@ -822,6 +894,7 @@ export function CanvasView(props: Props) {
         onPointerDown={(e) => onNodeDown(e, node)}
         onDoubleClick={(e) => {
           e.stopPropagation()
+          if (!fromMouse()) return
           if (node.type === 'text') startEditing(node.id)
           else openFile(node)
         }}
@@ -935,7 +1008,7 @@ export function CanvasView(props: Props) {
         backgroundPosition: `${view.x}px ${view.y}px`
       }}
       onPointerDown={onBackgroundDown}
-      onDoubleClick={(e) => editable && addCard(toWorld(e.clientX, e.clientY))}
+      onDoubleClick={(e) => editable && fromMouse() && addCard(toWorld(e.clientX, e.clientY))}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
       onDragOver={onDragOver}
@@ -1046,7 +1119,11 @@ export function CanvasView(props: Props) {
       {canvas.nodes.length === 0 && (
         <div className="canvas-empty">
           <p>An empty canvas.</p>
-          <p className="canvas-hint">Double-click anywhere to add a card, or drag notes and images in.</p>
+          <p className="canvas-hint">
+            {touch
+              ? 'Double-tap anywhere to add a card, or add notes and images from the toolbar.'
+              : 'Double-click anywhere to add a card, or drag notes and images in.'}
+          </p>
         </div>
       )}
 

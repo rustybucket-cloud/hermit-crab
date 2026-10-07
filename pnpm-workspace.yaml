@@ -3,3 +3,8 @@ nodeLinker: hoisted
 allowBuilds:
   electron-winstaller: true
   esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@capacitor/core@8.5.3'
+  - '@capacitor/ios@8.5.3'
+  - '@capacitor/cli@8.5.3'
