@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
-  appId: 'com.hermitcrab.app',
-  appName: 'HermitCrab',
+  appId: 'com.rustybucket.hermitcrab',
+  appName: 'HermitCrab Writing',
   webDir: 'out/mobile',
   // Bridge logging prints every file the app reads and writes, which slows the app down a lot.
   loggingBehavior: 'none',

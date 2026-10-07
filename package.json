@@ -1,6 +1,6 @@
 {
   "name": "hermit-crab",
-  "productName": "HermitCrab",
+  "productName": "HermitCrab Writing",
   "version": "0.1.0",
   "description": "A calm, markdown-based writing app with projects.",
   "main": "./out/main/index.js",
@@ -59,7 +59,7 @@
   },
   "build": {
     "appId": "com.hermitcrab.app",
-    "productName": "HermitCrab",
+    "productName": "HermitCrab Writing",
     "directories": {
       "output": "dist"
     },
