@@ -425,26 +425,7 @@ export function SheetListPane(props: Props) {
         </label>
       )}
 
-      <ul
-        className={`sheet-list${dropAt?.row === 'end' ? ' drop-end' : ''}`}
-        // The space below the last row means the end of the section.
-        onDragOver={(e) => {
-          if (!canReorder || !dragging.current || e.target !== e.currentTarget) return
-          e.preventDefault()
-          if (dropAt?.row !== 'end') setDropAt({ row: 'end', where: 'into' })
-        }}
-        onDragLeave={(e) => e.currentTarget === e.target && setDropAt(null)}
-        onDrop={(e) => {
-          const dragged = dragging.current
-          setDropAt(null)
-          if (!dragged) return
-          e.preventDefault()
-          props.onMove(dragged, { into: { section, subsection: null } })
-        }}
-      >
-        {rows}
-      </ul>
-
+      {/* Sits just below the search field, however tall the header above it. */}
       {projectId && empty && (
         <div className="empty-hint">
           {query ? (
@@ -466,6 +447,26 @@ export function SheetListPane(props: Props) {
           )}
         </div>
       )}
+
+      <ul
+        className={`sheet-list${dropAt?.row === 'end' ? ' drop-end' : ''}`}
+        // The space below the last row means the end of the section.
+        onDragOver={(e) => {
+          if (!canReorder || !dragging.current || e.target !== e.currentTarget) return
+          e.preventDefault()
+          if (dropAt?.row !== 'end') setDropAt({ row: 'end', where: 'into' })
+        }}
+        onDragLeave={(e) => e.currentTarget === e.target && setDropAt(null)}
+        onDrop={(e) => {
+          const dragged = dragging.current
+          setDropAt(null)
+          if (!dragged) return
+          e.preventDefault()
+          props.onMove(dragged, { into: { section, subsection: null } })
+        }}
+      >
+        {rows}
+      </ul>
     </section>
   )
 }

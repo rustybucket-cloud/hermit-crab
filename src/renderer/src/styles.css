@@ -640,10 +640,8 @@ button {
 }
 
 .sheets .empty-hint {
-  position: absolute;
-  top: 170px;
-  left: 0;
-  right: 0;
+  flex: none;
+  padding-top: 42px;
   text-align: center;
   color: var(--text-muted);
 }
