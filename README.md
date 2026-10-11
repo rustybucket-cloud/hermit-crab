@@ -90,6 +90,21 @@ pnpm ios:open   # open ios/App in Xcode, then pick a simulator or device and Run
 
 To run on a device, choose your team under **Signing & Capabilities** in Xcode. Run `pnpm ios:build` again after changing anything under `src/`. `npx electron scripts/ios-icons.cjs` rebuilds the app icons from `assets/hermit-crab-foreground.png`.
 
+#### Upload to App Store Connect
+
+`pnpm ios:release` builds the app on this Mac and uploads it to App Store Connect for TestFlight and the App Store. It needs Xcode, signed in to the Apple account for team `56LR4QD85S` (Xcode → Settings → Accounts), and an app record for `com.rustybucket.hermitcrab` in App Store Connect.
+
+```sh
+pnpm typecheck
+pnpm ios:release 2
+```
+
+Pass the build number, one higher than the latest build in App Store Connect → TestFlight. The version shown in the store is `MARKETING_VERSION` in the Xcode project.
+
+The script runs `pnpm ios:build`, archives the app, and uploads it. The archive and export are left in `ios/release`. Xcode creates the signing certificate and profile.
+
+To use an App Store Connect API key instead of Xcode's account, for example on a Mac without Xcode signed in, set `ASC_KEY_ID` and `ASC_ISSUER_ID`. The key is read from `~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8`, or from `ASC_KEY_PATH`.
+
 ### Layout
 
 ```
