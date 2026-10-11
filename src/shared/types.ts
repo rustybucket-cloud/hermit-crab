@@ -1,3 +1,9 @@
+/** The library's collections, by name, and the one that's open. */
+export interface CollectionList {
+  names: string[]
+  active: string
+}
+
 export interface ProjectSummary {
   /** Path of the project's folder within the library, such as `Fiction/My Novel`. */
   id: string
@@ -175,6 +181,20 @@ export interface HermitApi {
   revealLibrary(): Promise<void>
   /** A URL that shows a file in the library, such as an image on a canvas, from its path in the library. */
   fileUrl(libraryPath: string): string
+  /**
+   * Everything else works in the open collection: project and folder paths are within it. Listing the
+   * collections opens another if the open one has gone, such as when a sync removed it.
+   */
+  listCollections(): Promise<CollectionList>
+  openCollection(name: string): Promise<CollectionList>
+  /** Resolves with the new collection's name; it may differ to avoid a clash. */
+  createCollection(name: string): Promise<string>
+  /** Resolves with the collection's new name. */
+  renameCollection(name: string, next: string): Promise<string>
+  /** Asks first. The last collection can't go. */
+  deleteCollection(name: string): Promise<boolean>
+  /** Move a project or folder from the open collection to the top of another. Resolves with its path there. */
+  moveToCollection(libraryPath: string, collection: string): Promise<string>
   listProjects(): Promise<ProjectSummary[]>
   createProject(name: string, folder?: string | null): Promise<ProjectSummary>
   renameProject(projectId: string, name: string): Promise<ProjectSummary>

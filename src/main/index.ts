@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
+  CollectionList,
   ContextMenuEntry,
   ExportFormat,
   MenuAction,
@@ -13,7 +14,7 @@ import type {
   SheetPlace,
   SyncSettings
 } from '../shared/types'
-import { ARCHIVE_DIR, Library } from '../shared/library'
+import { ARCHIVE_DIR, Collections, Library } from '../shared/library'
 import { createWelcomeProject } from '../shared/welcome'
 import { exportDocument } from './export'
 import { nodeFs } from './node-fs'
@@ -22,6 +23,8 @@ import { GitSync } from './sync'
 
 interface Settings {
   libraryPath?: string
+  /** The collection open on this computer. */
+  collection?: string
   bounds?: Electron.Rectangle
   sync?: SyncSettings
 }
@@ -33,6 +36,8 @@ const appIcon = app.isPackaged
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
 
 let settings: Settings = {}
+let collections: Collections
+/** The open collection. */
 let library: Library
 let sync: GitSync
 let mainWindow: BrowserWindow | null = null
@@ -55,9 +60,41 @@ async function saveSettings(): Promise<void> {
 
 /** Only switches to the new library once it's ready, so a folder that can't be opened leaves the old one in place. */
 async function openLibrary(root: string): Promise<void> {
-  const next = new Library(root, nodeFs)
-  if (!(await next.ensure())) await createWelcomeProject(next, process.platform)
-  library = next
+  const next = new Collections(root, nodeFs)
+  const existed = await next.ensure()
+  await next.tidy(settings.collection)
+  const { active } = await next.pick(settings.collection)
+  const collection = next.open(active)
+  if (!existed) await createWelcomeProject(collection, process.platform)
+  collections = next
+  library = collection
+  settings.collection = active
+}
+
+/** Open `wanted`, or another collection if it's gone. */
+async function openCollection(wanted?: string | null): Promise<CollectionList> {
+  const list = await collections.pick(wanted)
+  library = collections.open(list.active)
+  if (list.active !== settings.collection) {
+    settings.collection = list.active
+    await saveSettings()
+  }
+  return list
+}
+
+let tidying: Promise<void> | null = null
+
+/** Gather projects an older copy of the app synced in to the top of the library into a collection. */
+function tidyLibrary(): Promise<void> {
+  tidying ??= (async () => {
+    const moved = await collections.tidy(settings.collection)
+    if (!moved.length) return
+    sync.noteChange()
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sync:changed', moved)
+  })()
+    .catch((err) => console.error('Tidying the library failed', err))
+    .finally(() => (tidying = null))
+  return tidying
 }
 
 // ── Library files ───────────────────────────────────────────────────────────
@@ -112,9 +149,13 @@ function createSync(): GitSync {
   const emit = (channel: string, payload: unknown) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
   }
-  return new GitSync(library.root, normalizeSyncSettings(settings.sync), {
+  return new GitSync(collections.root, normalizeSyncSettings(settings.sync), {
     flush: flushRenderer,
-    emitState: (state) => emit('sync:state', state),
+    emitState: (state) => {
+      emit('sync:state', state)
+      // Once git's done with the files, anything it brought in loose can move into a collection.
+      if (state.status === 'idle') void tidyLibrary()
+    },
     emitChanged: (paths) => paths.length && emit('sync:changed', paths),
     emitAgentOutput: (chunk) => emit('sync:agent-output', chunk),
     saveSettings: async (next) => {
@@ -239,7 +280,7 @@ ipcMain.on('app:close-ready', async (event) => {
 async function chooseLibrary(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
     title: 'Choose Library Folder',
-    defaultPath: library.root,
+    defaultPath: collections.root,
     properties: ['openDirectory', 'createDirectory']
   }
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
@@ -247,11 +288,11 @@ async function chooseLibrary(): Promise<string | null> {
   // Save edits into the library they belong to before switching.
   await flushRenderer()
   await openLibrary(result.filePaths[0])
-  settings.libraryPath = library.root
+  settings.libraryPath = collections.root
   await saveSettings()
-  await sync.setRoot(library.root)
+  await sync.setRoot(collections.root)
   send('library-changed')
-  return library.root
+  return collections.root
 }
 
 function buildMenu(): void {
@@ -297,7 +338,7 @@ function buildMenu(): void {
         { type: 'separator' },
         item('Project Settings…', 'project-settings'),
         { type: 'separator' },
-        { label: 'Show Library in Finder', click: () => shell.openPath(library.root) },
+        { label: 'Show Library in Finder', click: () => shell.openPath(collections.root) },
         { label: 'Change Library Location…', click: () => void chooseLibrary() },
         { type: 'separator' },
         ...(isMac
@@ -407,6 +448,33 @@ async function changed<T>(work: Promise<T>): Promise<T> {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('collections:list', () => openCollection(settings.collection))
+  ipcMain.handle('collections:open', (_e, name: string) => openCollection(name))
+  ipcMain.handle('collections:create', (_e, name: string) => changed(collections.create(name)))
+  ipcMain.handle('collections:rename', async (_e, name: string, next: string) => {
+    const renamed = await changed(collections.rename(name, next))
+    if (name === settings.collection) await openCollection(renamed)
+    return renamed
+  })
+  ipcMain.handle('collections:delete', async (_e, name: string) => {
+    if ((await collections.list()).length < 2) return false
+    const inside = (await collections.open(name).listProjects()).length
+    const ok = await confirm(
+      `Move “${name}” to the Trash?`,
+      inside
+        ? `The ${inside === 1 ? 'project' : `${inside} projects`} in it will be moved to the Trash too.`
+        : 'It has no projects in it.',
+      'Move to Trash'
+    )
+    if (!ok) return false
+    await changed(collections.remove(name))
+    if (name === settings.collection) await openCollection()
+    return true
+  })
+  ipcMain.handle('collections:move', (_e, libraryPath: string, to: string) =>
+    changed(collections.move(settings.collection!, libraryPath, to))
+  )
+
   ipcMain.handle('projects:list', () => library.listProjects())
   ipcMain.handle('projects:create', (_e, name: string, folder?: string | null) =>
     changed(library.createProject(name, folder))
@@ -443,9 +511,9 @@ function registerIpc(): void {
     if (ok) await changed(library.deleteFolder(folder))
     return ok
   })
-  ipcMain.handle('library:location', () => library.root)
+  ipcMain.handle('library:location', () => collections.root)
   ipcMain.handle('library:choose', () => chooseLibrary())
-  ipcMain.handle('library:reveal', () => shell.openPath(library.root).then(() => undefined))
+  ipcMain.handle('library:reveal', () => shell.openPath(collections.root).then(() => undefined))
   ipcMain.handle('library:move', (_e, libraryPath: string, folder: string | null) =>
     changed(library.moveInLibrary(libraryPath, folder))
   )

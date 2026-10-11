@@ -14,6 +14,12 @@ const api: HermitApi = {
   revealLibrary: () => ipcRenderer.invoke('library:reveal'),
   // Served by the main process's hermit-file protocol.
   fileUrl: (libraryPath) => `hermit-file://library/${libraryPath.split('/').map(encodeURIComponent).join('/')}`,
+  listCollections: () => ipcRenderer.invoke('collections:list'),
+  openCollection: (name) => ipcRenderer.invoke('collections:open', name),
+  createCollection: (name) => ipcRenderer.invoke('collections:create', name),
+  renameCollection: (name, next) => ipcRenderer.invoke('collections:rename', name, next),
+  deleteCollection: (name) => ipcRenderer.invoke('collections:delete', name),
+  moveToCollection: (libraryPath, collection) => ipcRenderer.invoke('collections:move', libraryPath, collection),
   listProjects: () => ipcRenderer.invoke('projects:list'),
   createProject: (name, folder) => ipcRenderer.invoke('projects:create', name, folder),
   renameProject: (projectId, name) => ipcRenderer.invoke('projects:rename', projectId, name),

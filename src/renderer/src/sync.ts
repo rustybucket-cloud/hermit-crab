@@ -19,8 +19,9 @@ export function useSyncState(): SyncState | null {
   return state
 }
 
-export function sheetPath(projectId: string, sheetId: string): string {
-  return `${projectId}/${sheetFile(sheetId)}`
+/** A sheet's path in the library, as sync knows it. */
+export function sheetPath(collection: string, projectId: string, sheetId: string): string {
+  return `${collection}/${projectId}/${sheetFile(sheetId)}`
 }
 
 export function timeAgo(ts: number): string {

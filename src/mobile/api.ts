@@ -1,9 +1,9 @@
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
-import { Library } from '../shared/library'
+import { Collections, FIRST_COLLECTION, Library } from '../shared/library'
 import { normalizeSyncSettings } from '../shared/sync'
-import type { ExportFormat, HermitApi, MenuAction, SyncSettings, SyncState } from '../shared/types'
+import type { CollectionList, ExportFormat, HermitApi, MenuAction, SyncSettings, SyncState } from '../shared/types'
 import { createWelcomeProject } from '../shared/welcome'
 import { exportDocument } from './export'
 import { nativeFs } from './fs'
@@ -21,11 +21,22 @@ type Location = { kind: 'app' } | { kind: 'folder'; id: string }
 
 const KEYS = {
   location: 'libraryLocation',
+  /** The collection open on this device. */
+  collection: 'collection',
   sync: 'syncSettings',
   author: 'syncAuthor',
   welcomed: 'welcomed',
-  /** The welcome project as it was made, so it can be told apart from one that's been written in. */
+  /**
+   * The welcome project as it was made, so it can be told apart from one that's been written in. Its `path` is
+   * within the library; from before collections, its `project` is within the first collection.
+   */
   welcome: 'welcomeProject'
+}
+
+interface Welcome {
+  path?: string
+  project?: string
+  print: string
 }
 
 /** iPads and iPhones share the app; some wording names the device. */
@@ -89,7 +100,10 @@ async function fingerprint(dir: string): Promise<string> {
 const plural = (n: number, noun: string) => (n === 1 ? `the ${noun}` : `the ${n} ${noun}s`)
 
 export function createMobileApi(): HermitApi {
+  let collections!: Collections
+  /** The open collection. */
   let library!: Library
+  let collection = FIRST_COLLECTION
   let location: Location = { kind: 'app' }
   /** Why the library can't be opened, if it can't. */
   let problem: string | null = null
@@ -118,18 +132,49 @@ export function createMobileApi(): HermitApi {
         problem = `Hermit Crab can no longer open the library folder you chose. Choose it again, or keep the library on this ${device}.`
       }
     }
-    library = new Library(root, nativeFs)
+    collections = new Collections(root, nativeFs)
+    library = collections.open(collection)
     if (problem) return
-    await library.ensure()
+    await collections.ensure()
+    await collections.tidy(await loadJson<string>(KEYS.collection))
+    await openCollection(await loadJson<string>(KEYS.collection))
     // The app's own folder starts with a project that shows how things work.
     if (where.kind === 'app' && !(await loadJson<boolean>(KEYS.welcomed))) {
-      const entries = await nativeFs.readdir(root)
+      const entries = await nativeFs.readdir(library.root)
       if (!entries.some((e) => !e.name.startsWith('.'))) {
         const project = await createWelcomeProject(library, 'ios')
-        await saveJson(KEYS.welcome, { project, print: await fingerprint(library.libraryDir(project)) })
+        const welcome: Welcome = { path: `${collection}/${project}`, print: await fingerprint(library.libraryDir(project)) }
+        await saveJson(KEYS.welcome, welcome)
       }
       await saveJson(KEYS.welcomed, true)
     }
+  }
+
+  /** Open `wanted`, or another collection if it's gone. */
+  async function openCollection(wanted?: string | null): Promise<CollectionList> {
+    const list = await collections.pick(wanted)
+    library = collections.open(list.active)
+    if (list.active !== collection) {
+      collection = list.active
+      await saveJson(KEYS.collection, collection)
+    }
+    return list
+  }
+
+  let tidying: Promise<void> | null = null
+
+  /** Gather projects an older copy of the app synced in to the top of the library into a collection. */
+  function tidyLibrary(): Promise<void> {
+    tidying ??= (async () => {
+      if (problem) return
+      const moved = await collections.tidy(collection)
+      if (!moved.length) return
+      sync.noteChange()
+      syncChanged.emit(moved)
+    })()
+      .catch((err) => console.error('Tidying the library failed', err))
+      .finally(() => (tidying = null))
+    return tidying
   }
 
   const ready = (async () => {
@@ -139,13 +184,17 @@ export function createMobileApi(): HermitApi {
 
     const settings = normalizeSyncSettings((await loadJson<Partial<SyncSettings>>(KEYS.sync)) ?? undefined)
     sync = new MobileSync(
-      library.root,
+      collections.root,
       gitdirFor(location),
       settings,
       await loadJson<Author>(KEYS.author),
       {
         flush: () => runAll(flushers),
-        emitState: (state) => syncStates.emit(state),
+        emitState: (state) => {
+          syncStates.emit(state)
+          // Once git's done with the files, anything it brought in loose can move into a collection.
+          if (state.status === 'idle') void tidyLibrary()
+        },
         emitChanged: (changed) => changed.length && syncChanged.emit(changed),
         saveSettings: (next) => saveJson(KEYS.sync, next).then(() => {}),
         beforeJoining: leaveWelcomeBehind
@@ -176,14 +225,15 @@ export function createMobileApi(): HermitApi {
    * joins a repository that has writing in it, the welcome project goes, unless it's been written in.
    */
   async function leaveWelcomeBehind(): Promise<void> {
-    const welcome = await loadJson<{ project: string; print: string }>(KEYS.welcome)
+    const welcome = await loadJson<Welcome>(KEYS.welcome)
     if (!welcome || location.kind !== 'app') return
     await Preferences.remove({ key: KEYS.welcome })
-    const dir = library.libraryDir(welcome.project)
+    const path = welcome.path ?? `${FIRST_COLLECTION}/${welcome.project}`
+    const dir = `${collections.root}/${path}`
     if (!(await nativeFs.exists(dir)) || (await fingerprint(dir)) !== welcome.print) return
     await runAll(flushers)
     await nativeFs.remove(dir)
-    syncChanged.emit([welcome.project])
+    syncChanged.emit([path])
   }
 
   /** The library, once it's open; or why it can't be. */
@@ -200,14 +250,15 @@ export function createMobileApi(): HermitApi {
     return result
   }
 
-  const describeLocation = () => (location.kind === 'app' ? `On My ${device} › Hermit Crab` : describeFolder(library.root))
+  const describeLocation = () =>
+    location.kind === 'app' ? `On My ${device} › Hermit Crab` : describeFolder(collections.root)
 
   const switchLibrary = async (where: Location) => {
     // Save edits into the library they belong to before switching.
     await runAll(flushers)
     await saveJson(KEYS.location, where)
     await openLibrary(where)
-    await sync.setRoot(library.root, gitdirFor(where), normalizeSyncSettings((await loadJson(KEYS.sync)) ?? undefined))
+    await sync.setRoot(collections.root, gitdirFor(where), normalizeSyncSettings((await loadJson(KEYS.sync)) ?? undefined))
     menuActions.emit('library-changed')
   }
 
@@ -247,6 +298,44 @@ export function createMobileApi(): HermitApi {
 
     fileUrl: (libraryPath) =>
       Capacitor.convertFileSrc(`${library?.root ?? ''}/${libraryPath}`.split('/').map(encodeURIComponent).join('/')),
+
+    listCollections: async () => {
+      await lib()
+      return openCollection(collection)
+    },
+    openCollection: async (name) => {
+      await lib()
+      return openCollection(name)
+    },
+    createCollection: async (name) => {
+      await lib()
+      const created = await collections.create(name)
+      sync.noteChange()
+      return created
+    },
+    async renameCollection(name, next) {
+      await lib()
+      const renamed = await collections.rename(name, next)
+      sync.noteChange()
+      if (name === collection) await openCollection(renamed)
+      return renamed
+    },
+    async deleteCollection(name) {
+      await lib()
+      if ((await collections.list()).length < 2) return false
+      const inside = (await collections.open(name).listProjects()).length
+      const ok = await confirmAction(
+        `Delete “${name}”?`,
+        inside ? `${plural(inside, 'project')} in it will be deleted too. This can’t be undone.` : 'It has no projects in it.',
+        'Delete Collection'
+      )
+      if (!ok) return false
+      await collections.remove(name)
+      sync.noteChange()
+      if (name === collection) await openCollection()
+      return true
+    },
+    moveToCollection: (libraryPath, to) => changed(() => collections.move(collection, libraryPath, to)),
 
     listProjects: async () => (await lib()).listProjects(),
     listFolders: async () => (await lib()).listFolders(),
