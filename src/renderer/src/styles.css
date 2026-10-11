@@ -789,6 +789,27 @@ button {
   opacity: 1;
 }
 
+/* Looks like the counts beside it until you reach for it. */
+.element-picker {
+  appearance: none;
+  height: 22px;
+  padding: 0 20px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' fill='none' stroke='%23888' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l3 3 3-3'/%3E%3C/svg%3E")
+    no-repeat right 7px center;
+  color: var(--text-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.element-picker:hover,
+.element-picker:focus-visible {
+  border-color: var(--border-strong);
+  background-color: var(--bg-hover);
+  outline: none;
+}
+
 .save-state.unsaved,
 .save-state.saving {
   color: var(--text-soft);
@@ -2773,6 +2794,29 @@ button {
 .format-bar .icon-button {
   flex: none;
   color: var(--text);
+}
+
+.format-bar-element {
+  flex: none;
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.format-bar-element.on {
+  background: var(--bg-active);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.format-bar-element:disabled {
+  color: var(--text-muted);
+  opacity: 0.5;
 }
 
 .library-location {

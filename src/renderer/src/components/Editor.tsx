@@ -4,6 +4,7 @@ import { EditorView, type Command } from '@codemirror/view'
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
 import type { ContentFormat } from '../../../shared/types'
 import { baseExtensions, focusMode, formatExtensions, typewriterMode } from '../editor/extensions'
+import { currentElement, type CurrentElement } from '../editor/fountain'
 import { grammarChecker, type GrammarDialect } from '../editor/grammar'
 
 export interface EditorHandle {
@@ -32,6 +33,8 @@ interface Props {
   /** Put the caret in the text whenever a sheet loads. */
   autoFocus?: boolean
   onChange(doc: Text): void
+  /** The screenplay element the caret is in, or null outside a screenplay. */
+  onElementChange?(element: CurrentElement | null): void
   ref?: Ref<EditorHandle>
 }
 
@@ -50,12 +53,15 @@ export function Editor({
   readOnly = false,
   autoFocus = true,
   onChange,
+  onElementChange,
   ref
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const loadedKey = useRef<string | null>(null)
   const onChangeRef = useRef(onChange)
+  const onElementRef = useRef(onElementChange)
+  const element = useRef<CurrentElement | null>(null)
   const focusSlot = useRef(new Compartment())
   const typewriterSlot = useRef(new Compartment())
   const readOnlySlot = useRef(new Compartment())
@@ -67,6 +73,7 @@ export function Editor({
 
   useEffect(() => {
     onChangeRef.current = onChange
+    onElementRef.current = onElementChange
     modes.current = { format, focus, typewriter, readOnly, checking, autoFocus }
   })
 
@@ -125,6 +132,11 @@ export function Editor({
           // Remote changes are already on disk; don't save them back.
           const local = update.transactions.some((tr) => tr.docChanged && !tr.annotation(Transaction.remote))
           if (local) onChangeRef.current(update.state.doc)
+          const now = currentElement(update.state)
+          if (now?.type !== element.current?.type || now?.speech !== element.current?.speech) {
+            element.current = now
+            onElementRef.current?.(now)
+          }
         })
       ]
     })

@@ -26,16 +26,16 @@ export interface FountainLine {
 }
 
 const TITLE_KEY = /^(title|credit|authors?|source|draft date|date|contact|copyright|notes|revision)\s*:/i
-const SCENE = /^(int|ext|est|int\.?\/ext|i\/e)[. ]/i
-const TRANSITION = /^[^\p{Ll}]*TO:$/u
+export const SCENE = /^(int|ext|est|int\.?\/ext|i\/e)[. ]/i
+export const TRANSITION = /^[^\p{Ll}]*TO:$/u
 const PAGE_BREAK = /^\s*={3,}\s*$/
 const NOTE_LINE = /^\s*\[\[.*\]\]\s*$/
 const PARENTHETICAL = /^\s*\(.*\)\s*$/
 
-const isBlank = (line: string | undefined) => line === undefined || line.trim() === ''
+export const isBlank = (line: string | undefined) => line === undefined || line.trim() === ''
 
 /** All capitals, with at least one letter, once an extension like (V.O.) and a dual-dialogue caret are set aside. */
-function isCharacterCue(line: string): boolean {
+export function isCharacterCue(line: string): boolean {
   const name = line.trim().replace(/\^$/, '').replace(/\(.*\)\s*$/, '').trim()
   return /\p{L}/u.test(name) && !/\p{Ll}/u.test(name)
 }
@@ -95,7 +95,8 @@ export function parseFountain(lines: string[]): FountainLine[] {
       push(text.endsWith('<') ? 'centered' : 'transition', 1)
     } else if (first === '!') {
       push('action', 1)
-    } else if (afterBlank && /^\.[^.]/.test(text)) {
+    } else if (afterBlank && /^\.(?!\.)/.test(text)) {
+      // A lone `.` is a scene heading not yet written, as the editor starts one.
       push('scene', 1)
     } else if (afterBlank && SCENE.test(text)) {
       push('scene')
@@ -192,6 +193,7 @@ export function fountainToHtml(source: string): string {
         return
       case 'scene': {
         endBlocks()
+        if (!text) return
         const number = /\s*#([\w.-]+)#$/.exec(text)
         const heading = number ? text.slice(0, number.index) : text
         html.push(
@@ -203,6 +205,7 @@ export function fountainToHtml(source: string): string {
       case 'centered':
       case 'lyric':
         endBlocks()
+        if (!text) return
         html.push(`<p class="${p.type}">${inline(text)}</p>`)
         return
       case 'page-break':

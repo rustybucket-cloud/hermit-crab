@@ -18,6 +18,7 @@ import type {
 } from '../../shared/types'
 import { CanvasView } from './components/CanvasView'
 import { Editor, type EditorHandle } from './components/Editor'
+import { ElementPicker } from './components/ElementPicker'
 import { FormatBar } from './components/FormatBar'
 import { BackIcon, EyeIcon, FocusIcon, MoreIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
@@ -28,6 +29,7 @@ import { SettingsOverlay, type SettingsTab } from './components/SettingsOverlay'
 import { SheetListPane } from './components/SheetListPane'
 import { touch, useCompact, useFocusWithin } from './device'
 import { formatCommands, type FormatCommand } from './editor/extensions'
+import { setScreenplayElement, type CurrentElement, type ScreenplayElement } from './editor/fountain'
 import { defaultDialect, type GrammarDialect } from './editor/grammar'
 import { formatCount } from './format'
 import { isWithin, otherSection, placeName, samePlace, SECTION_NAMES } from './sections'
@@ -143,6 +145,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<Set<string> | null>(null)
   const [stats, setStats] = useState<Stats>({ words: 0, chars: 0 })
+  const [element, setElement] = useState<CurrentElement | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [ready, setReady] = useState(false)
   const [libraryError, setLibraryError] = useState<string | null>(null)
@@ -1021,6 +1024,9 @@ export default function App() {
       const command = formatCommands[sheetFormat][cmd]
       if (editable && command) editor.current?.run(command)
     }
+    const setElementTo = (type: ScreenplayElement) => {
+      if (editable && sheetFormat === 'fountain') editor.current?.run(setScreenplayElement(type))
+    }
     switch (action) {
       case 'new-sheet': return void createSheet()
       case 'new-canvas': return void createCanvas()
@@ -1051,6 +1057,12 @@ export default function App() {
       case 'format-link': return run('link')
       case 'format-heading': return run('heading')
       case 'format-quote': return run('quote')
+      case 'element-scene': return setElementTo('scene')
+      case 'element-action': return setElementTo('action')
+      case 'element-character': return setElementTo('character')
+      case 'element-parenthetical': return setElementTo('parenthetical')
+      case 'element-dialogue': return setElementTo('dialogue')
+      case 'element-transition': return setElementTo('transition')
       case 'open-settings': return openSettings('appearance')
       case 'sync-now':
         if (sync?.status === 'conflict') return setMergeOpen(true)
@@ -1324,6 +1336,7 @@ export default function App() {
                 // On touch, the keyboard comes up only once the writer taps into the text.
                 autoFocus={!touch}
                 onChange={handleChange}
+                onElementChange={setElement}
               />
               {prefs.preview && <Preview text={previewSource} format={sheetFormat} />}
             </>
@@ -1367,6 +1380,7 @@ export default function App() {
         {formatBar && (
           <FormatBar
             format={sheetFormat}
+            element={element}
             onRun={(command) => editor.current?.run(command)}
             onDone={() => editor.current?.blur()}
           />
@@ -1374,6 +1388,15 @@ export default function App() {
 
         {current && !(compact && formatBar) && (
           <footer className="status-bar">
+            {element && !onCanvas && !prefs.preview && !conflicted && (
+              <ElementPicker
+                element={element}
+                onPick={(type) => {
+                  editor.current?.run(setScreenplayElement(type))
+                  editor.current?.focus()
+                }}
+              />
+            )}
             {stats.canvas !== undefined ? (
               <span>{stats.canvas}</span>
             ) : (

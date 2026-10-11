@@ -330,7 +330,19 @@ function buildMenu(): void {
         item('Link', 'format-link', 'CmdOrCtrl+K', true),
         { type: 'separator' },
         item('Heading', 'format-heading', 'CmdOrCtrl+Alt+H', true),
-        item('Quote', 'format-quote', "CmdOrCtrl+Alt+'", true)
+        item('Quote', 'format-quote', "CmdOrCtrl+Alt+'", true),
+        { type: 'separator' },
+        {
+          label: 'Screenplay Element',
+          submenu: [
+            item('Scene Heading', 'element-scene', 'CmdOrCtrl+Alt+1', true),
+            item('Action', 'element-action', 'CmdOrCtrl+Alt+2', true),
+            item('Character', 'element-character', 'CmdOrCtrl+Alt+3', true),
+            item('Parenthetical', 'element-parenthetical', 'CmdOrCtrl+Alt+4', true),
+            item('Dialogue', 'element-dialogue', 'CmdOrCtrl+Alt+5', true),
+            item('Transition', 'element-transition', 'CmdOrCtrl+Alt+6', true)
+          ]
+        }
       ]
     },
     {
