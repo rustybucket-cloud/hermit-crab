@@ -92,6 +92,13 @@ export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
+/** Up and down, for a button that picks one of several, like the collection switcher. */
+export const ChevronsUpDownIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="m7 9 5-5 5 5M7 15l5 5 5-5" />
+  </svg>
+)
+
 export const SlidersIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />

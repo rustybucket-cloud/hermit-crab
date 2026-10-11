@@ -1,4 +1,5 @@
 import type {
+  CollectionList,
   ContentFormat,
   Outline,
   OutlineItem,
@@ -24,7 +25,12 @@ import {
 } from './canvas'
 
 /**
- * A library is a plain folder. Every sub-folder is a project and every `.md`
+ * A library is a plain folder of collections, such as blog posts and writing practice, which keep
+ * unrelated work apart. Each collection is a folder at the top of the library, marked by a hidden
+ * `.hermit-collection` file, and works as a library of its own: the `Library` class below is one
+ * collection, and everything that follows about the library is true of each collection.
+ *
+ * In a collection, every sub-folder is a project and every `.md`
  * file inside a project is a sheet, so everything stays readable outside the app.
  * Projects can be grouped into folders, which nest; a folder of projects is marked
  * by a hidden `.hermit-folder` file, and a project's id is its path in the library.
@@ -79,6 +85,9 @@ export interface LibraryFs {
 
 const META_FILE = '.hermit.json'
 const FOLDER_MARKER = '.hermit-folder'
+const COLLECTION_MARKER = '.hermit-collection'
+/** The collection a library starts with, and the one a library from before collections moves into. */
+export const FIRST_COLLECTION = 'Writing'
 const NOTES_DIR = 'Notes'
 const ATTACHMENTS_DIR = 'Attachments'
 /** The archive, in a project or at the top of the library. */
@@ -129,6 +138,8 @@ function parentPath(p: string): string | null {
 }
 
 const lastSegment = (p: string) => p.slice(p.lastIndexOf('/') + 1)
+
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
 
 /** A folder's path within the project: '' for the content, `Notes` for the notes, or a subsection's folder. */
 function folderOf(place: SheetPlace): string {
@@ -371,13 +382,11 @@ export class Library {
       ...projects.map((id) => this.projectSummary(id)),
       ...archived.map((id) => this.projectSummary(id))
     ])
-    return summaries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+    return summaries.sort((a, b) => byName(a.name, b.name))
   }
 
   async listFolders(): Promise<string[]> {
-    return (await this.scanLibrary()).folders.sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-    )
+    return (await this.scanLibrary()).folders.sort(byName)
   }
 
   async projectSummary(projectId: string): Promise<ProjectSummary> {
@@ -449,6 +458,31 @@ export class Library {
   async deleteProject(projectId: string): Promise<void> {
     await this.fs.trash(this.projectDir(projectId))
     if (isArchived(projectId)) await this.pruneLibraryArchive(projectId)
+  }
+
+  /** Move a project or folder from outside the library, such as another collection, to its top. Returns its new path. */
+  async takeIn(dir: string, name: string): Promise<string> {
+    const target = await this.uniqueLibraryPath(null, name, name)
+    await this.fs.rename(dir, this.libraryDir(target))
+    return target
+  }
+
+  /** Move what's in another archive into this library's. Returns the new paths. */
+  async takeInArchive(dir: string): Promise<string[]> {
+    const archive = this.libraryDir(ARCHIVE_DIR)
+    if (!(await this.exists(archive))) {
+      await this.fs.rename(dir, archive)
+      return [ARCHIVE_DIR]
+    }
+    const moved: string[] = []
+    for (const e of await this.fs.readdir(dir)) {
+      if (!e.isDirectory || e.name.startsWith('.')) continue
+      const target = await this.uniqueLibraryPath(ARCHIVE_DIR, e.name, e.name)
+      await this.fs.rename(under(dir, e.name), this.libraryDir(target))
+      moved.push(target)
+    }
+    await this.removeIfHollow(dir)
+    return moved
   }
 
   // ── The library's archive ─────────────────────────────────────────────────
@@ -960,5 +994,122 @@ export class Library {
     const text = parts.map((p) => p.trim()).filter(Boolean).join('\n\n') + '\n'
     const title = sheetIds?.length === 1 ? summarize(parts[0], format).title || 'Untitled' : lastSegment(projectId)
     return { title, text, format }
+  }
+}
+
+/** The library as a whole: the collections at its top. Each collection opens as a `Library` of its own. */
+export class Collections {
+  constructor(
+    public readonly root: string,
+    private readonly fs: LibraryFs
+  ) {}
+
+  /** Make the library's folder if it's new. Resolves with whether it already existed. */
+  async ensure(): Promise<boolean> {
+    const existed = await this.fs.exists(this.root)
+    await this.fs.mkdir(this.root, true)
+    return existed
+  }
+
+  /** A collection, to work in as a library of its own. */
+  open(name: string): Library {
+    assertSafeName(name)
+    return new Library(under(this.root, name), this.fs)
+  }
+
+  /**
+   * The collections, and what's loose at the top of the library beside them: projects and folders of projects
+   * from before collections, or synced in by a copy of the app from before them, and their archive. Anything
+   * else at the top is left alone.
+   */
+  private async scan(): Promise<{ names: string[]; loose: string[] }> {
+    const found = { names: [] as string[], loose: [] as string[] }
+    const entries = await this.fs.readdir(this.root)
+    await Promise.all(
+      entries
+        .filter((e) => e.isDirectory && (e.name === ARCHIVE_DIR || !e.name.startsWith('.')))
+        .map(async ({ name }) => {
+          const has = (file: string) => this.fs.exists(under(this.root, name, file))
+          if (name !== ARCHIVE_DIR && (await has(COLLECTION_MARKER))) found.names.push(name)
+          else if (name === ARCHIVE_DIR || (await has(META_FILE)) || (await has(FOLDER_MARKER))) found.loose.push(name)
+        })
+    )
+    found.names.sort(byName)
+    return found
+  }
+
+  async list(): Promise<string[]> {
+    return (await this.scan()).names
+  }
+
+  /**
+   * Gather anything loose at the top of the library into `into`, or the first collection if that's gone,
+   * so everything is in a collection. A library with no collections gets one. Resolves with the paths of
+   * what moved, within the library.
+   */
+  async tidy(into?: string | null): Promise<string[]> {
+    const { names, loose } = await this.scan()
+    if (names.length && !loose.length) return []
+    const target = into && names.includes(into) ? into : (names[0] ?? (await this.create(FIRST_COLLECTION)))
+    const collection = this.open(target)
+    const moved: string[] = []
+    for (const name of loose) {
+      const dir = under(this.root, name)
+      moved.push(...(name === ARCHIVE_DIR ? await collection.takeInArchive(dir) : [await collection.takeIn(dir, name)]))
+    }
+    return moved.map((p) => `${target}/${p}`)
+  }
+
+  /**
+   * Which collection to open: `wanted`, if it's there, or else the first. Makes one if there are none,
+   * such as when every collection's folder was removed outside the app.
+   */
+  async pick(wanted?: string | null): Promise<CollectionList> {
+    let names = await this.list()
+    if (!names.length) {
+      await this.tidy()
+      names = await this.list()
+    }
+    return { names, active: wanted && names.includes(wanted) ? wanted : names[0] }
+  }
+
+  /** A name for a collection that nothing at the top of the library is using. `except` is its own current name. */
+  private async uniqueName(name: string, except?: string): Promise<string> {
+    const base = sanitizeName(name, 'Untitled Collection')
+    let candidate = base
+    const isSelf = (c: string) => c.toLowerCase() === except?.toLowerCase()
+    for (let n = 2; !isSelf(candidate) && (await this.fs.exists(under(this.root, candidate))); n++) {
+      candidate = `${base} ${n}`
+    }
+    return candidate
+  }
+
+  /** Resolves with the new collection's name; it may differ to avoid a clash. */
+  async create(name: string): Promise<string> {
+    const unique = await this.uniqueName(name)
+    await this.fs.mkdir(under(this.root, unique))
+    await this.fs.writeText(under(this.root, unique, COLLECTION_MARKER), '')
+    return unique
+  }
+
+  /** Resolves with the collection's new name. */
+  async rename(name: string, next: string): Promise<string> {
+    assertSafeName(name)
+    const unique = await this.uniqueName(next, name)
+    if (unique !== name) await this.fs.rename(under(this.root, name), under(this.root, unique))
+    return unique
+  }
+
+  /** Moves the collection, and every project in it, to the trash. */
+  async remove(name: string): Promise<void> {
+    assertSafeName(name)
+    await this.fs.trash(under(this.root, name))
+  }
+
+  /** Move a project or folder of projects to the top of another collection. Resolves with its path there. */
+  async move(from: string, libraryPath: string, to: string): Promise<string> {
+    if (from === to) return libraryPath
+    if (isArchived(libraryPath)) throw new Error('Restore it from the archive first.')
+    return this.open(to).takeIn(this.open(from).libraryDir(libraryPath), lastSegment(libraryPath))
   }
 }

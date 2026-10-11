@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
 import type { ProjectSummary } from '../../../shared/types'
 import { touch } from '../device'
-import { ChevronIcon, FolderIcon, GearIcon, PlusIcon } from './Icons'
+import { ChevronIcon, ChevronsUpDownIcon, FolderIcon, GearIcon, PlusIcon } from './Icons'
 
 export const SHEET_DRAG_TYPE = 'application/x-hermit-sheet'
 const LIBRARY_DRAG_TYPE = 'application/x-hermit-library-item'
@@ -10,6 +10,9 @@ const ARCHIVE_OPEN_KEY = 'hermit:archive-open'
 const INDENT = 14
 
 interface Props {
+  /** The open collection, whose projects these are. */
+  collection: string
+  renamingCollection: boolean
   projects: ProjectSummary[]
   /** Projects in the archive, sorted by name. */
   archived: ProjectSummary[]
@@ -19,6 +22,9 @@ interface Props {
   renamingId: string | null
   renamingFolder: string | null
   onSelect(id: string): void
+  /** The collection switcher's menu, shown over it. */
+  onCollectionMenu(at: { x: number; y: number }): void
+  onRenameCollection(name: string): void
   /** The new-item menu, shown over the footer's add button. */
   onNewMenu(at: { x: number; y: number }): void
   onOpenSettings(): void
@@ -302,8 +308,24 @@ export function LibraryPane(props: Props) {
         )}
       </nav>
       <footer className="library-footer">
+        {props.renamingCollection ? (
+          <RenameField initial={props.collection} onCommit={props.onRenameCollection} onCancel={props.onRenameEnd} />
+        ) : (
+          <button
+            className="ghost-button collection-switcher"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect()
+              props.onCollectionMenu({ x: rect.left, y: rect.top })
+            }}
+            title="Switch Collection"
+            aria-haspopup="menu"
+          >
+            <span className="collection-name">{props.collection}</span>
+            <ChevronsUpDownIcon className="collection-chevrons" />
+          </button>
+        )}
         <button
-          className="ghost-button"
+          className="icon-button"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect()
             props.onNewMenu({ x: rect.left, y: rect.top })
@@ -311,7 +333,7 @@ export function LibraryPane(props: Props) {
           title="New…"
           aria-haspopup="menu"
         >
-          <PlusIcon /> New
+          <PlusIcon />
         </button>
         <button className="icon-button" onClick={props.onOpenSettings} title="Settings (⌘,)">
           <GearIcon />

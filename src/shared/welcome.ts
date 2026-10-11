@@ -14,7 +14,8 @@ A quiet place to write. Everything you write is plain **Markdown**, saved automa
 
 ## How it's organised
 
-- **Projects** live in the left column. Each one is just a folder on disk. Group them into folders with the **+ New** button at the bottom of the column, and drag projects onto a folder to file them there.
+- **Projects** live in the left column. Each one is just a folder on disk. Group them into folders with the **+** button at the bottom of the column, and drag projects onto a folder to file them there.
+- **Collections** keep different kinds of writing apart, such as blog posts and practice pieces. Switch between them, or start a new one, with the switcher at the bottom left.
 - **Sheets** live in the middle column. Each sheet is one Markdown file. Its first line becomes its title.
 - Every project has two sections, switched at the top of the middle column. **Content** is the work itself. **Notes** hold everything behind it: plans, outlines, research, characters.
 - The **editor** is on the right.
@@ -78,7 +79,8 @@ A quiet place to write. Everything you write is plain **Markdown**, saved automa
 
 ## How it's organised
 
-- **Projects** are listed in the library. Each one is just a folder. Group them into folders with the **+ New** button at the bottom of the library.
+- **Projects** are listed in the library. Each one is just a folder. Group them into folders with the **+** button at the bottom of the library.
+- **Collections** keep different kinds of writing apart, such as blog posts and practice pieces. Switch between them, or start a new one, with the switcher at the bottom of the library.
 - **Sheets** are listed in each project. Each sheet is one Markdown file. Its first line becomes its title.
 - Every project has two sections, switched at the top of the sheet list. **Content** is the work itself. **Notes** hold everything behind it: plans, outlines, research, characters.
 

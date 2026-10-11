@@ -76,7 +76,22 @@ const FONTS: Record<EditorFont, string> = {
 }
 
 const PREFS_KEY = 'hermit:prefs'
+/** Where things were left: overall, and with the collection's name after a colon, in each collection. */
 const LAST_KEY = 'hermit:last'
+
+interface Last {
+  /** Missing from before collections. */
+  collection?: string
+  projectId?: string
+  sheetId?: string
+}
+
+/** Where things were left in a collection. */
+function lastIn(collection: string): Last {
+  const latest = loadJson<Last>(LAST_KEY, {})
+  const fallback = !latest.collection || latest.collection === collection ? latest : {}
+  return loadJson<Last>(`${LAST_KEY}:${collection}`, fallback)
+}
 
 /** On a phone the panes show one at a time, like screens. */
 type Screen = 'library' | 'sheets' | 'editor'
@@ -142,6 +157,11 @@ export default function App() {
   const [folders, setFolders] = useState<string[]>([])
   const [renamingProject, setRenamingProject] = useState<string | null>(null)
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
+  // Every collection in the library, and the open one, whose projects the library shows.
+  const [collections, setCollections] = useState<string[]>([])
+  const [collection, setCollection] = useState('')
+  const collectionRef = useRef('')
+  const [renamingCollection, setRenamingCollection] = useState(false)
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<Set<string> | null>(null)
   const [stats, setStats] = useState<Stats>({ words: 0, chars: 0 })
@@ -175,6 +195,13 @@ export default function App() {
   const lastInSection = useRef(new Map<string, string>())
 
   useEffect(() => localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)), [prefs])
+
+  /** Note the open sheet, so the app, and its collection, open on it next time. */
+  const remember = (pid: string, sheetId: string) => {
+    const last: Last = { collection: collectionRef.current, projectId: pid, sheetId }
+    localStorage.setItem(LAST_KEY, JSON.stringify(last))
+    localStorage.setItem(`${LAST_KEY}:${collectionRef.current}`, JSON.stringify(last))
+  }
 
   // ── Saving ────────────────────────────────────────────────────────────────
 
@@ -223,6 +250,10 @@ export default function App() {
   /** On failure, keeps the last lists and reports why instead of throwing. */
   const refreshProjects = useCallback(async () => {
     try {
+      const { names, active } = await hermit.listCollections()
+      collectionRef.current = active
+      setCollections(names)
+      setCollection(active)
       const [list, folderList] = await Promise.all([hermit.listProjects(), hermit.listFolders()])
       setProjects(list)
       setFolders(folderList)
@@ -261,7 +292,7 @@ export default function App() {
       setArchiveOpen(sheet.archived)
       if (!sheet.archived) setSection(sheet.section)
       lastInSection.current.set(viewKey(pid, sheet), sheetId)
-      localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId }))
+      remember(pid, sheetId)
     },
     [flush]
   )
@@ -287,12 +318,19 @@ export default function App() {
     [flush, openSheet, refreshSheets]
   )
 
+  /** Open the project and sheet last open in the collection, from its list of projects. */
+  const resume = useCallback(
+    async (list: ProjectSummary[]) => {
+      const last = lastIn(collectionRef.current)
+      await openProject(list.find((p) => p.id === last.projectId)?.id ?? firstActive(list), last.sheetId)
+    },
+    [openProject]
+  )
+
   const init = useCallback(async () => {
-    const list = await refreshProjects()
-    const last = loadJson<{ projectId?: string; sheetId?: string }>(LAST_KEY, {})
-    await openProject(list.find((p) => p.id === last.projectId)?.id ?? firstActive(list), last.sheetId)
+    await resume(await refreshProjects())
     setReady(true)
-  }, [openProject, refreshProjects])
+  }, [resume, refreshProjects])
 
   useEffect(() => {
     void init()
@@ -302,7 +340,14 @@ export default function App() {
 
   /** A pull changed files on disk: refresh the lists and the open sheet. */
   const handleSyncChanged = async (paths: string[]) => {
+    const was = collectionRef.current
     const list = await refreshProjects()
+    // The open collection went, so another opened in its place.
+    if (collectionRef.current !== was) {
+      pending.current = null
+      await resume(list)
+      return
+    }
     if (!projectId || !list.some((p) => p.id === projectId)) {
       await openProject(firstActive(list))
       return
@@ -310,7 +355,7 @@ export default function App() {
     const { sheets: sheetList, archived: archivedList } = await refreshSheets(projectId)
     if (!current || current.projectId !== projectId) return
     const id = current.sheet.id
-    if (!paths.includes(sheetPath(projectId, id))) return
+    if (!paths.includes(sheetPath(collectionRef.current, projectId, id))) return
 
     // Anything typed in the moment since sync saved this sheet would overwrite what was just pulled.
     discardPending((p) => p.projectId === projectId && p.sheetId === id)
@@ -345,7 +390,7 @@ export default function App() {
     }
   }, [sync?.status])
 
-  const conflicted = Boolean(current && sync?.conflicts.includes(sheetPath(current.projectId, current.sheet.id)))
+  const conflicted = Boolean(current && sync?.conflicts.includes(sheetPath(collection, current.projectId, current.sheet.id)))
   const onCanvas = Boolean(current && isCanvasId(current.sheet.id))
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -416,9 +461,7 @@ export default function App() {
     if (pending.current) pending.current = { ...pending.current, projectId: remap(pending.current.projectId) }
     if (projectId) setProjectId(remap(projectId))
     setCurrent((c) => (c ? { ...c, projectId: remap(c.projectId) } : c))
-    if (current) {
-      localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: remap(current.projectId), sheetId: current.sheet.id }))
-    }
+    if (current) remember(remap(current.projectId), current.sheet.id)
   }
 
   const createFolder = async (parent: string | null = null) => {
@@ -490,6 +533,111 @@ export default function App() {
       console.error('Restore failed', err)
     }
     await refreshProjects()
+  }
+
+  // ── Collections ───────────────────────────────────────────────────────────
+
+  /** Open another collection, where it was left. */
+  const switchCollection = async (name: string) => {
+    if (name === collectionRef.current) return
+    await flush()
+    // Anything typed since belongs to the collection being left.
+    pending.current = null
+    setRenamingProject(null)
+    setRenamingFolder(null)
+    try {
+      await hermit.openCollection(name)
+    } catch (err) {
+      console.error('Opening the collection failed', err)
+    }
+    await resume(await refreshProjects())
+  }
+
+  /** A new collection opens straight away, with its name ready to type. */
+  const createCollection = async () => {
+    await flush()
+    const name = await hermit.createCollection('New Collection')
+    await switchCollection(name)
+    setPrefs((p) => ({ ...p, showLibrary: true }))
+    setScreen('library')
+    setRenamingCollection(true)
+  }
+
+  const renameCollection = async (name: string) => {
+    setRenamingCollection(false)
+    const from = collectionRef.current
+    await flush()
+    try {
+      const renamed = await hermit.renameCollection(from, name)
+      const last = localStorage.getItem(`${LAST_KEY}:${from}`)
+      if (last && renamed !== from) {
+        localStorage.setItem(`${LAST_KEY}:${renamed}`, last)
+        localStorage.removeItem(`${LAST_KEY}:${from}`)
+      }
+    } catch (err) {
+      console.error('Rename failed', err)
+    }
+    await refreshProjects()
+    if (current) remember(current.projectId, current.sheet.id)
+  }
+
+  const deleteCollection = async (name: string) => {
+    await flush()
+    if (!(await hermit.deleteCollection(name))) return
+    localStorage.removeItem(`${LAST_KEY}:${name}`)
+    if (name !== collectionRef.current) {
+      await refreshProjects()
+      return
+    }
+    pending.current = null
+    await resume(await refreshProjects())
+  }
+
+  /** Move a project or folder to another collection. The open project, if it goes, makes way for another. */
+  const moveToCollection = async (libraryPath: string, to: string) => {
+    await flush()
+    try {
+      await hermit.moveToCollection(libraryPath, to)
+    } catch (err) {
+      console.error('Move failed', err)
+      return
+    }
+    const inside = (id: string) => id === libraryPath || id.startsWith(`${libraryPath}/`)
+    discardPending((p) => inside(p.projectId))
+    const list = await refreshProjects()
+    if (projectId && inside(projectId)) await openProject(firstActive(list))
+  }
+
+  /** The switcher at the foot of the library: every collection, and what can be done with the open one. */
+  const showCollectionMenu = async (at: { x: number; y: number }) => {
+    const choice = await hermit.showContextMenu(
+      [
+        ...collections.map((name, i) => ({ id: `open:${i}`, label: `${name === collection ? '✓ ' : ''}${name}` })),
+        { type: 'separator' },
+        { id: 'new', label: 'New Collection' },
+        { id: 'rename', label: 'Rename Collection' },
+        {
+          id: 'delete',
+          label: touch ? 'Delete Collection…' : 'Move Collection to Trash…',
+          enabled: collections.length > 1
+        }
+      ],
+      at
+    )
+    if (choice?.startsWith('open:')) void switchCollection(collections[Number(choice.slice(5))])
+    else if (choice === 'new') void createCollection()
+    else if (choice === 'rename') setRenamingCollection(true)
+    else if (choice === 'delete') void deleteCollection(collection)
+  }
+
+  /** Menu items to move a project or folder to each other collection, with ids `collection:<index>`. */
+  const collectionItems = (): ContextMenuEntry[] => {
+    const others = collections.filter((c) => c !== collection)
+    if (!others.length) return []
+    return [
+      { type: 'separator' },
+      ...others.map((name) => ({ id: `collection:${collections.indexOf(name)}`, label: `Move to “${name}”` }))
+    ]
   }
 
   /** New sheets go after the open one, or at the end of `place` when given. */
@@ -628,7 +776,7 @@ export default function App() {
       const sheet = await hermit.readSheet(pid, openId)
       setCurrent({ projectId: pid, sheet, key: `${pid}/${openId}#${++loadSeq.current}` })
       lastInSection.current.set(viewKey(pid, sheet), openId)
-      localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId: openId }))
+      remember(pid, openId)
       return
     }
     const moved = list.find((s) => s.id === renamed[current.sheet.id])
@@ -636,7 +784,7 @@ export default function App() {
     const { id, section: movedTo, subsection, archived: isArchived } = moved
     setCurrent({ ...current, sheet: { ...current.sheet, id, section: movedTo, subsection, archived: isArchived } })
     lastInSection.current.set(viewKey(pid, moved), id)
-    localStorage.setItem(LAST_KEY, JSON.stringify({ projectId: pid, sheetId: id }))
+    remember(pid, id)
   }
 
   /** Reorder or refile a sheet or subsection. */
@@ -787,11 +935,13 @@ export default function App() {
       { id: 'settings', label: 'Project Settings…' },
       { type: 'separator' },
       ...exportItems(formatOf(id)),
+      ...(inArchive ? [] : collectionItems()),
       { type: 'separator' },
       ...(inArchive ? [] : [{ id: 'archive', label: 'Archive' }]),
       { id: 'delete', label: TRASH_LABEL }
     ])
     if (choice === 'rename') setRenamingProject(id)
+    else if (choice?.startsWith('collection:')) void moveToCollection(id, collections[Number(choice.slice(11))])
     else if (choice === 'move') void chooseFolderFor(id)
     else if (choice === 'archive') void archiveProject(id)
     else if (choice === 'restore') void restoreProject(id)
@@ -869,10 +1019,12 @@ export default function App() {
       { id: 'new-folder', label: 'New Folder' },
       { id: 'rename', label: 'Rename' },
       ...(touch && canMoveInLibrary(folder) ? [{ id: 'move', label: 'Move to Folder…' }] : []),
+      ...collectionItems(),
       { type: 'separator' },
       { id: 'delete', label: TRASH_LABEL }
     ])
     if (choice === 'new-project') void createProject(folder)
+    else if (choice?.startsWith('collection:')) void moveToCollection(folder, collections[Number(choice.slice(11))])
     else if (choice === 'new-folder') void createFolder(folder)
     else if (choice === 'rename') setRenamingFolder(folder)
     else if (choice === 'move') void chooseFolderFor(folder)
@@ -1143,6 +1295,10 @@ export default function App() {
     <div className={`app platform-${hermit.platform}${compact ? ' compact' : ''}`} style={style}>
       {(compact ? screen === 'library' : prefs.showLibrary) && (
         <LibraryPane
+          collection={collection}
+          renamingCollection={renamingCollection}
+          onCollectionMenu={(at) => void showCollectionMenu(at)}
+          onRenameCollection={(name) => void renameCollection(name)}
           projects={projects.filter((p) => !p.archived)}
           archived={projects.filter((p) => p.archived)}
           folders={folders}
@@ -1159,6 +1315,7 @@ export default function App() {
           onRenameEnd={() => {
             setRenamingProject(null)
             setRenamingFolder(null)
+            setRenamingCollection(false)
           }}
           onStartRename={setRenamingProject}
           onRenameFolder={(folder, name) => void renameFolder(folder, name)}

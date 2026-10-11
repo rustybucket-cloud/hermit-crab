@@ -321,8 +321,35 @@ button {
 .library-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 2px;
   padding: 10px 8px 12px;
+}
+
+/* Which collection the library shows; a menu switches to another, like Obsidian's vault switcher. */
+.collection-switcher {
+  flex: 1;
+  min-width: 0;
+  justify-content: space-between;
+  padding-left: 10px;
+  color: var(--text);
+}
+
+.collection-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collection-chevrons {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-muted);
+}
+
+.library-footer .rename-field {
+  margin-right: 4px;
 }
 
 /* ── Sheet list ─────────────────────────────────────────────────────────── */
