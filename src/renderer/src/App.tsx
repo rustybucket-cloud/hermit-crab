@@ -1169,6 +1169,43 @@ export default function App() {
     else openSettings('sync')
   }
 
+  const saveLabel = saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Not saved — retrying on next edit' : 'Saving…'
+
+  /** What a phone's status bar shouts about; anything else waits in its sheet. */
+  const statusProblem =
+    saveState === 'error'
+      ? { label: 'Not saved', tone: 'error' }
+      : sync?.status === 'conflict'
+        ? { label: 'Sync conflict', tone: 'conflict' }
+        : sync?.status === 'error'
+          ? { label: 'Not synced', tone: 'error' }
+          : null
+
+  /** A phone's status bar has room for a word count; the rest of it is a tap away. */
+  const showStatusSheet = async () => {
+    const counts =
+      stats.canvas ??
+      [formatCount(stats.words, 'word'), formatCount(stats.chars, 'character'), `${readingMinutes(stats.words)} min read`].join(
+        ' · '
+      )
+    const synced = !syncLabel(sync)
+      ? null
+      : sync!.status === 'idle' && sync!.lastSyncedAt
+        ? `Synced with GitHub ${timeAgo(sync!.lastSyncedAt)}`
+        : (sync!.message ?? syncLabel(sync))
+    const resolving = sync?.status === 'conflict' || sync?.status === 'resolving'
+    const choice = await hermit.showContextMenu(
+      [
+        ...(sync?.remoteUrl && sync.settings.enabled ? [{ id: 'sync-now', label: 'Sync Now' }] : []),
+        ...(syncLabel(sync) ? [{ id: 'sync', label: resolving ? 'Resolve Conflict…' : 'Sync Settings…' }] : [])
+      ],
+      undefined,
+      { title: counts, message: [saveLabel, synced].filter(Boolean).join('\n'), dismiss: 'Done' }
+    )
+    if (choice === 'sync-now') handleMenu('sync-now')
+    else if (choice === 'sync') syncStatusClick()
+  }
+
   const handleMenu = (action: MenuAction) => {
     // The editor sits under the settings overlay; don't edit it blind.
     const editable = !prefs.preview && !settingsOpen && !projectSettingsFor && !mergeOpen && !conflicted && !onCanvas
@@ -1548,36 +1585,44 @@ export default function App() {
             {element && !onCanvas && !prefs.preview && !conflicted && (
               <ElementPicker
                 element={element}
+                compact={compact}
                 onPick={(type) => {
                   editor.current?.run(setScreenplayElement(type))
                   editor.current?.focus()
                 }}
               />
             )}
-            {stats.canvas !== undefined ? (
-              <span>{stats.canvas}</span>
+            {compact ? (
+              <button className="status-summary" aria-haspopup="menu" onClick={() => void showStatusSheet()}>
+                <span>{stats.canvas ?? formatCount(stats.words, 'word')}</span>
+                {statusProblem && <span className={`status-problem ${statusProblem.tone}`}>{statusProblem.label}</span>}
+              </button>
             ) : (
               <>
-                <span>{formatCount(stats.words, 'word')}</span>
-                <span>{formatCount(stats.chars, 'character')}</span>
-                <span>{readingMinutes(stats.words)} min read</span>
+                {stats.canvas !== undefined ? (
+                  <span>{stats.canvas}</span>
+                ) : (
+                  <>
+                    <span>{formatCount(stats.words, 'word')}</span>
+                    <span>{formatCount(stats.chars, 'character')}</span>
+                    <span>{readingMinutes(stats.words)} min read</span>
+                  </>
+                )}
+                <span className={`save-state ${saveState}`}>{saveLabel}</span>
+                {syncLabel(sync) && (
+                  <button
+                    className={`sync-state ${sync!.status}`}
+                    onClick={syncStatusClick}
+                    title={
+                      sync!.status === 'idle' && sync!.lastSyncedAt
+                        ? `Synced with GitHub ${timeAgo(sync!.lastSyncedAt)}`
+                        : (sync!.message ?? 'GitHub sync')
+                    }
+                  >
+                    {syncLabel(sync)}
+                  </button>
+                )}
               </>
-            )}
-            <span className={`save-state ${saveState}`}>
-              {saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Not saved — retrying on next edit' : 'Saving…'}
-            </span>
-            {syncLabel(sync) && (
-              <button
-                className={`sync-state ${sync!.status}`}
-                onClick={syncStatusClick}
-                title={
-                  sync!.status === 'idle' && sync!.lastSyncedAt
-                    ? `Synced with GitHub ${timeAgo(sync!.lastSyncedAt)}`
-                    : (sync!.message ?? 'GitHub sync')
-                }
-              >
-                {syncLabel(sync)}
-              </button>
             )}
           </footer>
         )}
