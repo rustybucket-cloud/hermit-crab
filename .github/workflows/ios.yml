@@ -1,0 +1,181 @@
+name: iOS update or release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Build and upload to App Store Connect even if native code hasn't changed
+        type: boolean
+        default: false
+
+# Runs one at a time, so a run starts after the last release has tagged its
+# build. A newer push replaces a run that's still waiting, not one in progress.
+concurrency:
+  group: ios
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Compare with the last release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      native: ${{ steps.native.outputs.native }}
+      build: ${{ steps.native.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The ios/build/* tags record each release.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Each release is tagged ios/build/<build number> with the hash of its
+      # native code as the message (scripts/bundle-version.ts). Installed builds
+      # only take updates made for their own native code, so a different hash
+      # needs a new build.
+      - name: Compare native code
+        id: native
+        env:
+          FORCE_RELEASE: ${{ inputs.release }}
+        run: |
+          version=$(pnpm --reporter silent run ios:version)
+          native=${version##*-}
+          tag=$(git tag --list 'ios/build/*' --sort=-version:refname | head -1)
+          if [ -z "$tag" ]; then
+            echo "::error::No ios/build/* tag. Tag the latest App Store Connect build (see BUILDING.md)."
+            exit 1
+          fi
+          released=$(git tag --list --format='%(contents:subject)' "$tag")
+          echo "build=$(( ${tag#ios/build/} + 1 ))" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE_RELEASE" = "true" ]; then
+            echo "Release requested: releasing a new build ($native)."
+            echo "native=changed" >> "$GITHUB_OUTPUT"
+          elif [ "$native" = "$released" ]; then
+            echo "Native code matches $tag ($native): publishing an update."
+            echo "native=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "Native code changed since $tag ($released → $native): releasing a new build."
+            echo "native=changed" >> "$GITHUB_OUTPUT"
+          fi
+
+  update:
+    name: Publish a live update
+    needs: check
+    if: needs.check.outputs.native == 'unchanged'
+    runs-on: ubuntu-latest
+    permissions:
+      # Uploads to the ios-web release.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Typechecks and builds first, and publishes nothing if the iOS app's code is unchanged.
+      - name: Publish
+        run: pnpm ios:update
+
+  release:
+    name: Build and upload to App Store Connect
+    needs: check
+    if: needs.check.outputs.native == 'changed'
+    runs-on: macos-26
+    timeout-minutes: 90
+    permissions:
+      # Pushes the ios/build/* tag.
+      contents: write
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      BUILD_NUMBER: ${{ needs.check.outputs.build }}
+    steps:
+      - name: Check for secrets
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          IOS_DEV_CERT_P12: ${{ secrets.IOS_DEV_CERT_P12 }}
+        run: |
+          missing=0
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 IOS_DEV_CERT_P12; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Add a $name repository secret (see BUILDING.md)."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Where ios:release looks for the key.
+      - name: Install App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/"AuthKey_$ASC_KEY_ID.p8"
+
+      # Xcode signs the archive with this development certificate and the
+      # upload with a cloud-managed distribution certificate. Without it,
+      # Xcode would make a new development certificate on every run.
+      - name: Install signing certificate
+        env:
+          IOS_DEV_CERT_P12: ${{ secrets.IOS_DEV_CERT_P12 }}
+          IOS_DEV_CERT_PASSWORD: ${{ secrets.IOS_DEV_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -base64 24)
+          printf '%s' "$IOS_DEV_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$IOS_DEV_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Build and upload
+        run: pnpm ios:release "$BUILD_NUMBER"
+
+      # Tags the build with the native code it was actually built with, so the
+      # next run compares against what's installed.
+      - name: Tag the release
+        run: |
+          config=ios/release/HermitCrab.xcarchive/Products/Applications/App.app/capacitor.config.json
+          built=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).plugins.CapacitorUpdater.version' "$config")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "ios/build/$BUILD_NUMBER" -m "${built##*-}"
+          git push origin "ios/build/$BUILD_NUMBER"
+          expected=$(pnpm --reporter silent run ios:version)
+          if [ "${built##*-}" != "${expected##*-}" ]; then
+            echo "::error::Build $BUILD_NUMBER has native code ${built##*-}, but updates are published for ${expected##*-}, so it won't receive them."
+            exit 1
+          fi
