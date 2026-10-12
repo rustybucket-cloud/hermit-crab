@@ -28,7 +28,7 @@ jobs:
       # A local tag standing in for the latest App Store Connect build, which predates live updates.
       - name: Compare native code
         run: |
-          git tag -a ios/build/1 -m none
+          git -c user.name=test -c user.email=test@example.com tag -a ios/build/1 -m none
           version=$(pnpm --reporter silent run ios:version)
           native=${version##*-}
           tag=$(git tag --list 'ios/build/*' --sort=-version:refname | head -1)
