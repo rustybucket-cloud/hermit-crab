@@ -2,7 +2,7 @@
 
 # Hermit Crab
 
-Hermit Crab is a quiet, Markdown-based writing app for the Mac, iPhone and iPad, in the spirit of Ulysses. You organise your writing into collections and projects, write in a distraction-free editor with focus and typewriter modes, plan with notes and visual canvases, write screenplays in Fountain, and export to Markdown, HTML or PDF. Your library is just a folder of plain `.md` files on disk, and it can sync through iCloud Drive or a GitHub repository.
+Hermit Crab is a quiet, Markdown-based writing app for the Mac, iPhone and iPad. You organise your writing into collections and projects, write in a distraction-free editor with focus and typewriter modes, plan with notes and visual canvases, write screenplays in Fountain, and export to Markdown, HTML or PDF. Your library is just a folder of plain `.md` files on disk, and it can sync through iCloud Drive or a GitHub repository.
 
 ## Usage
 

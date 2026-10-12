@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HermitCrab Writing</title>
+  <meta name="description" content="A Markdown writing app for the Mac. Your writing stays a folder of plain .md files.">
+  <link rel="icon" href="favicon.png">
+  <style>
+    :root {
+      --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --font-serif: 'Iowan Old Style', Charter, 'Palatino Linotype', Georgia, serif;
+      --bg: #172131;
+      --border: rgba(255, 255, 255, 0.12);
+      --text: #ece4d6;
+      --text-muted: #7d8799;
+      --accent: #4ba3f7;
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 1.2rem/1.6 var(--font-serif);
+    }
+    .page {
+      max-width: 34rem;
+      margin: 0 auto;
+      padding: 4rem 1.5rem;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    header img { width: 52px; height: 52px; }
+    h1 { font-size: 1.6rem; font-weight: 600; margin: 0; }
+    a { color: var(--accent); }
+    .download { font-family: var(--font-ui); font-size: 1rem; margin: 2rem 0 0; }
+    .download > a {
+      display: inline-block;
+      color: inherit;
+      text-decoration: none;
+      border: 1px solid var(--text);
+      border-radius: 6px;
+      padding: 0.45rem 0.9rem;
+    }
+    .download > a:hover { background: var(--text); color: var(--bg); }
+    .download small { display: block; color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem; }
+    .download small a { color: inherit; }
+    figure { margin: 3.5rem 0; }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    @media (min-width: 60rem) {
+      figure { margin-left: -12rem; margin-right: -12rem; }
+    }
+    ul { padding-left: 1.2rem; }
+    li { margin-bottom: 0.4rem; }
+    footer { color: var(--text-muted); font-size: 0.95rem; margin-top: 3rem; }
+    footer a { color: inherit; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <img src="icon.png" alt="">
+      <h1>HermitCrab Writing</h1>
+    </header>
+
+    <p>A Markdown writing app for the Mac.</p>
+    <p>Your library is a folder of plain <code>.md</code> files. Open them in any other editor, back them up however you like, and keep them if you ever stop using this app.</p>
+
+    <p class="download">
+      <a id="download" href="https://github.com/rustybucket-cloud/hermit-crab/releases/latest">Download for Mac</a>
+      <small>For Macs with Apple silicon. Once installed, it keeps itself up to date. <a href="https://github.com/rustybucket-cloud/hermit-crab/releases">Older versions</a></small>
+    </p>
+
+    <figure>
+      <img src="screenshot.jpg" width="2560" height="1560" alt="A chapter of a story open in the editor, with the project's other chapters listed beside it">
+    </figure>
+
+    <p>What it does:</p>
+    <ul>
+      <li>Collections and projects keep different kinds of writing apart. Each project has notes and canvases for planning beside the work itself.</li>
+      <li>Focus mode hides the sidebars and dims everything but the paragraph you're on. Typewriter mode keeps your line in the middle of the screen.</li>
+      <li>Grammar checking that runs on your Mac, not on someone's server.</li>
+      <li>Screenplays in Fountain.</li>
+      <li>Export to Markdown, HTML or PDF.</li>
+      <li>Sync through iCloud Drive or a GitHub repository.</li>
+    </ul>
+
+    <footer>
+      Free and open source, MIT licensed. <a href="https://github.com/rustybucket-cloud/hermit-crab">Source on GitHub</a>.
+    </footer>
+  </div>
+
+  <script>
+    // The .dmg's file name includes the version, so look up the latest release to link it directly.
+    // If the lookup fails, the link still goes to the latest release page.
+    fetch('https://api.github.com/repos/rustybucket-cloud/hermit-crab/releases/latest')
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((release) => {
+        const dmg = release.assets.find((asset) => asset.name.endsWith('.dmg'));
+        if (!dmg) return;
+        const link = document.getElementById('download');
+        link.href = dmg.browser_download_url;
+        link.textContent = 'Download ' + release.tag_name.replace(/^v/, '') + ' for Mac';
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
