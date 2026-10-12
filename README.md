@@ -81,7 +81,15 @@ Set `HERMIT_LIBRARY=/some/folder` to point the app at a different library (handy
 
 ### Release for the Mac
 
-`pnpm package` makes an unsigned build, which macOS blocks on other Macs until it's allowed in System Settings → Privacy & Security. `pnpm mac:release` makes a build signed with a Developer ID certificate and notarized by Apple, which opens without a warning. It stops before building if either of these is missing:
+`pnpm package` makes an unsigned build, which macOS blocks on other Macs until it's allowed in System Settings → Privacy & Security. `pnpm mac:release` releases a new version, signed with a Developer ID certificate and notarized by Apple so it opens without a warning:
+
+```sh
+pnpm mac:release 0.3.0
+```
+
+It sets the version in `package.json`, typechecks, builds, signs with the hardened runtime, sends the app to Apple to notarize, which usually takes a few minutes, staples the ticket, and checks that Gatekeeper accepts it. Then it commits the version as "Release 0.3.0", pushes `main`, and publishes a `v0.3.0` GitHub release with release notes from the commits since the last one, and every file the updater needs.
+
+Run it from `main`, with everything committed and nothing to pull. It checks this, that the version hasn't been released and isn't lower than the current one, and that `gh` is signed in, before the slow build. If the build fails, `package.json` is put back. If the push or the upload fails, run it again with the same version. It also needs these, set up once:
 
 1. A **Developer ID Application** certificate for team `56LR4QD85S` in the keychain. Only the team's Account Holder can create one: Xcode → Settings → Accounts → Manage Certificates → + → Developer ID Application.
 2. **Notarization credentials**, stored once in the keychain:
@@ -92,21 +100,11 @@ Set `HERMIT_LIBRARY=/some/folder` to point the app at a different library (handy
 
    It asks for your Apple ID and an [app-specific password](https://account.apple.com/account/manage). To use another profile name, set `APPLE_KEYCHAIN_PROFILE`. electron-builder's other credentials also work: `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` for an App Store Connect API key, or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`.
 
-To release a new version, raise `version` in `package.json`, then commit and push it:
-
-```sh
-pnpm typecheck
-pnpm mac:release
-gh release create v0.2.0 dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml --generate-notes
-```
-
-The script builds, signs with the hardened runtime, sends the app to Apple to notarize, which usually takes a few minutes, staples the ticket, and checks that Gatekeeper accepts it. It ends by printing the `gh release create` command for the version it built.
-
 #### Updates
 
 The Mac app updates itself from this repository's [GitHub Releases](https://github.com/rustybucket-cloud/hermit-crab/releases). Shortly after launch, and every four hours, it checks the latest release's `latest-mac.yml` for a newer version, downloads the `.zip` in the background, and offers to restart into it. If you choose Later, it installs the next time you quit. **HermitCrab Writing → Check for Updates…** checks straight away.
 
-Upload all four kinds of file to every release: without `latest-mac.yml`, the app can't see the release, and without the `.zip`, it can't install it. Drafts and pre-releases aren't offered. macOS only installs an update signed with the same certificate as the copy being updated, so builds from `pnpm mac:release` update one another, but an unsigned copy, such as the 0.1.0 download, has to be replaced by hand.
+A release made by hand needs the same files as one from `pnpm mac:release`: the `.dmg`, the `.zip`, their `.blockmap`s and `latest-mac.yml`. Without `latest-mac.yml`, the app can't see the release, and without the `.zip`, it can't install it. Drafts and pre-releases aren't offered. macOS only installs an update signed with the same certificate as the copy being updated, so builds from `pnpm mac:release` update one another, but an unsigned copy, such as the 0.1.0 download, has to be replaced by hand.
 
 ### iOS
 
