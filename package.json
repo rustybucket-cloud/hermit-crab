@@ -18,6 +18,7 @@
     "ios:open": "cap open ios",
     "ios:release": "./scripts/ios-release.sh",
     "ios:update": "./scripts/ios-update.sh",
+    "ios:next-build": "node --no-warnings scripts/asc-next-build.ts",
     "ios:version": "node --no-warnings --input-type=module -e \"import { bundleVersion } from './scripts/bundle-version.ts'; console.log(bundleVersion(process.cwd()))\"",
     "mac:release": "./scripts/mac-release.sh"
   },

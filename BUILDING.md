@@ -34,7 +34,8 @@ its own native code, so changing any of those needs a new App Store build.
 pnpm ios:release 7
 ```
 
-Pass the build number, one higher than the latest in App Store Connect → TestFlight. It needs Xcode
+Pass the build number, one higher than the latest in App Store Connect → TestFlight
+(`pnpm ios:next-build` prints it, given an API key as below). It needs Xcode
 signed in to the team's Apple account, or an App Store Connect API key in `ASC_KEY_ID` and
 `ASC_ISSUER_ID`, read from `~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8` or
 `ASC_KEY_PATH`.
@@ -49,7 +50,8 @@ On every push to `main`, the `iOS update or release` action
 (`.github/workflows/ios.yml`) compares the native code's hash with the last release's. If they
 match, it runs `pnpm ios:update`, which publishes nothing if the iOS app's code hasn't changed. If
 native code changed, it runs `pnpm ios:release` on a GitHub macOS runner with the next build number,
-so the new build goes to TestFlight. To release a build without a native change, run the action from
+so the new build goes to TestFlight. The build number is one past the last tag or the latest upload
+in App Store Connect, whichever is higher. To release a build without a native change, run the action from
 the Actions tab with **release** ticked (`gh workflow run ios.yml -f release=true`). Typecheck and
 both builds run on pull requests (`.github/workflows/checks.yml`).
 
@@ -78,4 +80,7 @@ Releasing needs these repository secrets (`gh secret set <name>`):
   `base64 -i cert.p12 | gh secret set IOS_DEV_CERT_P12`. Xcode signs the archive with it; without
   it, every run would create a new certificate.
 
-Runs go one at a time, so a push made during a release waits for its tag.
+Runs go one at a time, so a push made during a release waits for its tag. GitHub won't let the
+action push a tag to a commit whose workflow files differ from `main`'s, so if a workflow change
+lands during a release, the run fails after uploading and prints the commands to push the tag by
+hand. Until it's pushed, the next push to `main` releases another build.
