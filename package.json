@@ -16,7 +16,8 @@
     "package": "pnpm build && electron-builder",
     "ios:build": "vite build --config vite.mobile.config.ts && cap sync ios",
     "ios:open": "cap open ios",
-    "ios:release": "./scripts/ios-release.sh"
+    "ios:release": "./scripts/ios-release.sh",
+    "mac:release": "./scripts/mac-release.sh"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",

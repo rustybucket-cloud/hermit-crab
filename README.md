@@ -79,6 +79,26 @@ The `dev` and `preview` commands download the Electron executable if it is missi
 
 Set `HERMIT_LIBRARY=/some/folder` to point the app at a different library (handy for testing). You can also change the library from **File → Change Library Location…**.
 
+### Release for the Mac
+
+`pnpm package` makes an unsigned build, which macOS blocks on other Macs until it's allowed in System Settings → Privacy & Security. `pnpm mac:release` makes a build signed with a Developer ID certificate and notarized by Apple, which opens without a warning. It stops before building if either of these is missing:
+
+1. A **Developer ID Application** certificate for team `56LR4QD85S` in the keychain. Only the team's Account Holder can create one: Xcode → Settings → Accounts → Manage Certificates → + → Developer ID Application.
+2. **Notarization credentials**, stored once in the keychain:
+
+   ```sh
+   xcrun notarytool store-credentials hermit-crab-notary --team-id 56LR4QD85S
+   ```
+
+   It asks for your Apple ID and an [app-specific password](https://account.apple.com/account/manage). To use another profile name, set `APPLE_KEYCHAIN_PROFILE`. electron-builder's other credentials also work: `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` for an App Store Connect API key, or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`.
+
+```sh
+pnpm typecheck
+pnpm mac:release
+```
+
+The script builds, signs with the hardened runtime, sends the app to Apple to notarize, which usually takes a few minutes, staples the ticket, and checks that Gatekeeper accepts it. The `.dmg` and `.zip` are left in `dist/`, ready to attach to a GitHub release.
+
 ### iOS
 
 The iOS app needs Xcode 26 or later. Capacitor wraps the renderer in a native app, and Swift Package Manager fetches the native dependencies the first time Xcode builds it.
