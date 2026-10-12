@@ -107,7 +107,6 @@ jobs:
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      BUILD_NUMBER: ${{ needs.check.outputs.build }}
     steps:
       - name: Check for secrets
         env:
@@ -142,6 +141,16 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           printf '%s\n' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/"AuthKey_$ASC_KEY_ID.p8"
 
+      # One past the last ios/build/* tag, or past the latest upload to App Store Connect if that's
+      # higher: a build whose tag didn't get pushed was still uploaded. The tag covers an upload
+      # App Store Connect doesn't list yet.
+      - name: Choose the build number
+        env:
+          TAGGED: ${{ needs.check.outputs.build }}
+        run: |
+          uploaded=$(pnpm --reporter silent run ios:next-build)
+          echo "BUILD_NUMBER=$(( uploaded > TAGGED ? uploaded : TAGGED ))" >> "$GITHUB_ENV"
+
       # Xcode signs the archive with this development certificate and the
       # upload with a cloud-managed distribution certificate. Without it,
       # Xcode would make a new development certificate on every run.
@@ -165,7 +174,9 @@ jobs:
         run: pnpm ios:release "$BUILD_NUMBER"
 
       # Tags the build with the native code it was actually built with, so the
-      # next run compares against what's installed.
+      # next run compares against what's installed. GitHub won't let this
+      # workflow's token push a tag to a commit whose workflow files differ from
+      # main's, which happens when a workflow change lands during the build.
       - name: Tag the release
         run: |
           config=ios/release/HermitCrab.xcarchive/Products/Applications/App.app/capacitor.config.json
@@ -173,7 +184,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "ios/build/$BUILD_NUMBER" -m "${built##*-}"
-          git push origin "ios/build/$BUILD_NUMBER"
+          if ! git push origin "ios/build/$BUILD_NUMBER"; then
+            echo "::error::Build $BUILD_NUMBER is uploaded, but its tag wasn't pushed, so the next push to main releases another build. To record it: git tag -a ios/build/$BUILD_NUMBER -m ${built##*-} $GITHUB_SHA && git push origin ios/build/$BUILD_NUMBER"
+            exit 1
+          fi
           expected=$(pnpm --reporter silent run ios:version)
           if [ "${built##*-}" != "${expected##*-}" ]; then
             echo "::error::Build $BUILD_NUMBER has native code ${built##*-}, but updates are published for ${expected##*-}, so it won't receive them."
