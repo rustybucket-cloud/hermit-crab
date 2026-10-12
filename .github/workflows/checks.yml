@@ -1,0 +1,37 @@
+name: Checks
+
+on:
+  pull_request:
+
+# A newer push to the same PR replaces a run that's still checking.
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build the desktop app
+        run: pnpm build
+
+      # Builds the iOS bundle the way a live update does, so a broken one never gets published.
+      - name: Build the iOS app
+        run: IOS_RELEASE=1 pnpm exec vite build --config vite.mobile.config.ts

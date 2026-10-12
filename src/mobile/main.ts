@@ -1,5 +1,6 @@
-// Order matters: the API must be in place before the app's modules read `window.hermit`.
-import './polyfills'
-import './install'
-import '../renderer/src/main'
-import './mobile.css'
+import { applyUpdate, startUpdater } from './updates'
+
+// A live update takes over before the app starts, so the page never reloads under someone's writing.
+await applyUpdate()
+await import('./app')
+startUpdater()

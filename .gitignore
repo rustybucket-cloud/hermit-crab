@@ -4,3 +4,5 @@ dist/
 .DS_Store
 *.log
 *.tsbuildinfo
+# Worktrees Claude Code makes for its sessions, each a checkout of its own.
+.claude/worktrees/

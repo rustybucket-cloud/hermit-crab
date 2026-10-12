@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the iOS app and uploads it to App Store Connect.
-# See "Upload to App Store Connect" in README.md.
+# Pushing to main runs this through .github/workflows/ios.yml when native code changes. See BUILDING.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,8 +16,9 @@ if ! [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
 fi
 
 if [ -n "$(git status --porcelain)" ]; then
-  echo "Warning: building with uncommitted changes." >&2
+  echo "Warning: building with uncommitted changes. Live updates published later may not fit this build's native code." >&2
 fi
+VERSION=$(pnpm --reporter silent run ios:version)
 
 # Optional App Store Connect API key. Without one, Xcode's signed-in account is used.
 auth=()
@@ -29,7 +30,8 @@ if [ -n "${ASC_KEY_ID:-}" ]; then
   )
 fi
 
-pnpm ios:build
+# Stamps the bundle built into the app with its version, so the app can take live updates (scripts/ios-update.sh).
+IOS_RELEASE=1 pnpm ios:build
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -64,3 +66,4 @@ xcodebuild -exportArchive \
   -allowProvisioningUpdates ${auth[@]+"${auth[@]}"}
 
 echo "Uploaded build $BUILD_NUMBER. The build appears in App Store Connect → TestFlight once Apple finishes processing it."
+echo "Its web bundle is $VERSION. It takes live updates for native code ${VERSION##*-}."
