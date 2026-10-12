@@ -96,6 +96,12 @@
   margin-top: 4px;
   font-size: 13px;
   color: var(--text-muted);
+  white-space: pre-line;
+}
+
+/* A sheet that's only there to be read has nothing under its header. */
+.hc-menu-header:last-child {
+  border-bottom: none;
 }
 
 .hc-menu-group + .hc-menu-group {

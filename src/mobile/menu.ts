@@ -12,6 +12,8 @@ export interface MenuOptions {
   at?: { x: number; y: number }
   /** Ids of items to show in red, for actions that destroy something. */
   destructive?: string[]
+  /** The label of a phone sheet's Cancel button, such as Done when the sheet is mostly there to be read. */
+  dismiss?: string
 }
 
 let lastPoint: { x: number; y: number } | null = null
@@ -86,7 +88,7 @@ export function showMenu(entries: ContextMenuEntry[], options: MenuOptions = {})
     menu.append(panel)
 
     if (asSheet) {
-      const cancel = element('button', 'hc-menu-item hc-menu-cancel', 'Cancel')
+      const cancel = element('button', 'hc-menu-item hc-menu-cancel', options.dismiss ?? 'Cancel')
       cancel.addEventListener('click', (e) => {
         e.stopPropagation()
         finish(null)

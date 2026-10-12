@@ -2694,6 +2694,71 @@ button {
   padding-right: 20px;
 }
 
+/* One line on a phone: the screenplay element at the left, the word count at the right, the rest in a sheet. */
+.compact .status-bar {
+  height: calc(48px + env(safe-area-inset-bottom));
+  padding: 0 16px env(safe-area-inset-bottom);
+  gap: 8px;
+  font-size: 13px;
+  opacity: 1;
+}
+
+.compact .element-picker,
+.status-summary {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 15px;
+  background-color: var(--bg-hover);
+  color: var(--text-soft);
+  font: inherit;
+  white-space: nowrap;
+}
+
+/* On a narrow phone, a long element gives way to the count and any trouble beside it. */
+.compact .element-picker {
+  min-width: 0;
+  padding-right: 26px;
+  background-position: right 11px center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-summary {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* With an element beside it, the count keeps to the right; alone, it sits in the middle. */
+.compact .element-picker + .status-summary {
+  margin-left: auto;
+}
+
+.status-problem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.status-problem::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-problem.conflict {
+  color: #d97706;
+}
+
+.status-problem.error {
+  color: #dc2626;
+}
+
 /* Settings and the merge editor fill the screen. */
 .compact .settings-backdrop {
   padding: 0;

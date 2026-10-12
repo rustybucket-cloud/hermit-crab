@@ -246,8 +246,15 @@ export interface HermitApi {
   searchSheets(projectId: string, query: string): Promise<string[]>
   /** Without ids, exports the project's content. Without a format, the user is asked to pick one. */
   exportSheets(projectId: string, sheetIds: string[] | null, format?: ExportFormat): Promise<string | null>
-  /** Shows at the pointer, or at `at` in window coordinates, such as below a button. */
-  showContextMenu(items: ContextMenuEntry[], at?: { x: number; y: number }): Promise<string | null>
+  /**
+   * Shows at the pointer, or at `at` in window coordinates, such as below a button. On touch, `sheet` can head it
+   * with a title and message and rename its Cancel button; the desktop's native menus have no room for them.
+   */
+  showContextMenu(
+    items: ContextMenuEntry[],
+    at?: { x: number; y: number },
+    sheet?: { title?: string; message?: string; dismiss?: string }
+  ): Promise<string | null>
   /** Replace the dock / window icon with a PNG data URL. */
   setAppIcon(dataUrl: string): void
   getSyncState(): Promise<SyncState>

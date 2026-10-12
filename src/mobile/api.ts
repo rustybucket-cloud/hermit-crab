@@ -427,7 +427,7 @@ export function createMobileApi(): HermitApi {
       return exportDocument(doc, format, `${paths.support}/Exports`)
     },
 
-    showContextMenu: (items, at) => showMenu(items, { at }),
+    showContextMenu: (items, at, sheet) => showMenu(items, { ...sheet, at }),
 
     getSyncState: async () => {
       await ready
