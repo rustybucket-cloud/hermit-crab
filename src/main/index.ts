@@ -20,6 +20,7 @@ import { exportDocument } from './export'
 import { nodeFs } from './node-fs'
 import { normalizeSyncSettings } from '../shared/sync'
 import { GitSync } from './sync'
+import { checkForUpdatesNow, isInstallingUpdate, startUpdater } from './updater'
 
 interface Settings {
   libraryPath?: string
@@ -249,6 +250,16 @@ function createWindow(): void {
   }
 }
 
+/** Close the window the usual way, saving and syncing its edits, and wait until it's gone. */
+function closeMainWindow(): Promise<void> {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return Promise.resolve()
+  return new Promise((resolve) => {
+    win.once('closed', () => resolve())
+    win.close()
+  })
+}
+
 function finishClose(win: BrowserWindow): void {
   if (win.isDestroyed() || closeReady) return
   closeReady = true
@@ -311,6 +322,7 @@ function buildMenu(): void {
             label: app.name,
             submenu: [
               { role: 'about' },
+              { label: 'Check for Updates…', click: () => void checkForUpdatesNow() },
               { type: 'separator' },
               item('Settings…', 'open-settings', 'Cmd+,'),
               item('Sync Now', 'sync-now', 'Cmd+Alt+S'),
@@ -642,6 +654,7 @@ app.whenReady().then(async () => {
   buildMenu()
   createWindow()
   void sync.start()
+  startUpdater(closeMainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -655,5 +668,6 @@ app.on('before-quit', () => {
 app.on('will-quit', () => sync?.stop())
 
 app.on('window-all-closed', () => {
+  if (isInstallingUpdate()) return // the updater quits once the windows are closed
   if (!isMac || isQuitting) app.quit()
 })

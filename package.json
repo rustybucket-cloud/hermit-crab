@@ -52,6 +52,7 @@
     "buffer": "^6.0.3",
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.16",
+    "electron-updater": "^6.8.9",
     "harper.js": "^2.10.0",
     "isomorphic-git": "^1.43.1",
     "marked": "^18.0.14",
@@ -74,8 +75,14 @@
         "to": "hermit-crab.png"
       }
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "rustybucket-cloud",
+      "repo": "hermit-crab"
+    },
     "mac": {
       "icon": "assets/hermit-crab.icns",
+      "artifactName": "HermitCrab-Writing-${version}-${arch}-mac.${ext}",
       "category": "public.app-category.productivity",
       "target": [
         "dmg",

@@ -28,6 +28,8 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "Warning: building with uncommitted changes." >&2
 fi
 
+# Old builds would otherwise be uploaded along with the new one.
+rm -rf dist
 pnpm build
 electron-builder --mac -c.forceCodeSigning=true
 
@@ -37,4 +39,8 @@ for app in dist/mac*/*.app; do
   spctl --assess --type execute --verbose "$app"
 done
 
-echo "Signed and notarized. The .dmg and .zip are in dist/."
+VERSION=$(node -p "require('./package.json').version")
+echo "Signed and notarized. To publish, push the release commit, then run:"
+echo
+# The app finds updates through latest-mac.yml, and installs them from the .zip.
+echo "  gh release create v$VERSION dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml --generate-notes"
