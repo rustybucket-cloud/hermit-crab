@@ -1470,6 +1470,11 @@ button {
   opacity: 1;
 }
 
+.canvas-edge-end {
+  opacity: 1;
+  cursor: grab;
+}
+
 .canvas-resize {
   position: absolute;
   right: -5px;

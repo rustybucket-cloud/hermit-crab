@@ -31,7 +31,7 @@ export function anchor(r: Rect, side: CanvasSide): Point {
   }
 }
 
-const center = (r: Rect): Point => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 })
+export const center = (r: Rect): Point => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 })
 
 /** The side of `r` that faces `p`. */
 export function facingSide(r: Rect, p: Point): CanvasSide {
@@ -79,6 +79,8 @@ export interface EdgeGeometry {
   path: string
   /** Halfway along the curve, for the label. */
   mid: Point
+  /** Where it arrives, at its `to` end. */
+  end: Point
   /** Triangles for the arrowheads, as SVG polygon points. */
   arrows: string[]
 }
@@ -112,7 +114,7 @@ export function curve(
   const arrows: string[] = []
   if (ends.end) arrows.push(arrowhead(to, toSide ? c2 : c1, 12))
   if (ends.start) arrows.push(arrowhead(from, c1, 12))
-  return { path: `M ${from.x} ${from.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${to.x} ${to.y}`, mid, arrows }
+  return { path: `M ${from.x} ${from.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${to.x} ${to.y}`, mid, end: to, arrows }
 }
 
 /** Where a connection between two cards runs, choosing sides for whichever end doesn't name one. */

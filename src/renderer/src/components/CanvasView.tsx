@@ -36,6 +36,7 @@ import type { SheetSummary } from '../../../shared/types'
 import {
   anchor,
   boundsOf,
+  center,
   curve,
   edgeGeometry,
   facingSide,
@@ -107,7 +108,7 @@ type Gesture =
   | { kind: 'select'; start: Point; client: Point; base: ReadonlySet<string>; moved: boolean }
   | { kind: 'move'; start: Point; origins: Map<string, Point>; lead: string; moved: boolean }
   | { kind: 'resize'; id: string; start: Point; origin: Rect }
-  | { kind: 'connect'; from: string; side: CanvasSide }
+  | { kind: 'connect'; from: string; side: CanvasSide; edge?: CanvasEdge }
   | { kind: 'pinch'; distance: number; middle: Point; view: View }
 
 /** A connection being drawn: from a card's side to wherever the pointer is. */
@@ -116,6 +117,8 @@ interface Link {
   side: CanvasSide
   point: Point
   target: string | null
+  /** The connection whose end is being moved, when it isn't a new one. */
+  edge?: CanvasEdge
 }
 
 interface Props {
@@ -605,6 +608,19 @@ export function CanvasView(props: Props) {
     setLink(linkRef.current)
   }
 
+  /** Picks up the `to` end of a connection, to take it to another card. Its start stays put. */
+  const onEdgeEndDown = (e: ReactPointerEvent, edge: CanvasEdge, end: Point) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const from = nodesById.get(edge.fromNode)
+    const to = nodesById.get(edge.toNode)
+    if (!from || !to) return
+    const side = edge.fromSide ?? facingSide(from, center(to))
+    gesture.current = { kind: 'connect', from: from.id, side, edge }
+    linkRef.current = { from: from.id, side, point: end, target: to.id, edge }
+    setLink(linkRef.current)
+  }
+
   const onPointerMove = (e: PointerEvent) => {
     if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const g = gesture.current
@@ -662,8 +678,12 @@ export function CanvasView(props: Props) {
       })))
     } else if (g.kind === 'connect') {
       const p = toWorld(e.clientX, e.clientY)
-      const target = nodeAt(canvas.nodes, p, 8 / viewRef.current.zoom)
-      linkRef.current = { from: g.from, side: g.side, point: p, target: target && target.id !== g.from ? target.id : null }
+      const found = nodeAt(canvas.nodes, p, 8 / viewRef.current.zoom)
+      const target = found && found.id !== g.from ? found : null
+      // A connection that doesn't name the side it leaves from keeps leaving from whichever faces its end.
+      const from = nodesById.get(g.from)
+      const side = g.edge && !g.edge.fromSide && from ? facingSide(from, target ? center(target) : p) : g.side
+      linkRef.current = { from: g.from, side, point: p, target: target?.id ?? null, edge: g.edge }
       setLink(linkRef.current)
     }
   }
@@ -712,8 +732,17 @@ export function CanvasView(props: Props) {
     setLink(null)
     const from = nodesById.get(fromId)
     if (!l || !from || !editable) return
-    const edge = { id: newId(), fromNode: fromId, fromSide, toEnd: 'arrow' as const }
     const target = l.target ? nodesById.get(l.target) : undefined
+    // Moving an existing connection's end: onto another card, or, dropped anywhere else, back where it was.
+    if (l.edge) {
+      const moved = l.edge
+      const toSide = target && facingSide(target, l.point)
+      if (target && (target.id !== moved.toNode || toSide !== moved.toSide)) {
+        commit(patchEdge(moved.id, (e) => ({ ...e, toNode: target.id, toSide })))
+      }
+      return
+    }
+    const edge = { id: newId(), fromNode: fromId, fromSide, toEnd: 'arrow' as const }
     if (target) {
       const toSide = facingSide(target, l.point)
       commit({ ...canvasRef.current, edges: [...canvasRef.current.edges, { ...edge, toNode: target.id, toSide }] })
@@ -1004,7 +1033,9 @@ export function CanvasView(props: Props) {
     )
   }
 
+  // A connection whose end is being moved is drawn as the link instead.
   const edgeShapes = canvas.edges.flatMap((edge) => {
+    if (edge.id === link?.edge?.id) return []
     const from = nodesById.get(edge.fromNode)
     const to = nodesById.get(edge.toNode)
     return from && to ? [{ edge, geo: edgeGeometry(edge, from, to) }] : []
@@ -1015,11 +1046,14 @@ export function CanvasView(props: Props) {
     const from = nodesById.get(link.from)
     const target = link.target ? nodesById.get(link.target) : undefined
     if (!from) return null
+    const ends = link.edge
+      ? { start: link.edge.fromEnd === 'arrow', end: (link.edge.toEnd ?? 'arrow') === 'arrow' }
+      : { start: false, end: true }
     if (target) {
       const toSide = facingSide(target, link.point)
-      return curve(anchor(from, link.side), link.side, anchor(target, toSide), toSide, { start: false, end: true })
+      return curve(anchor(from, link.side), link.side, anchor(target, toSide), toSide, ends)
     }
-    return curve(anchor(from, link.side), link.side, link.point, null, { start: false, end: true })
+    return curve(anchor(from, link.side), link.side, link.point, null, ends)
   })()
 
   // The edge layer only needs to cover the cards, and wherever a connection is being drawn to.
@@ -1163,6 +1197,13 @@ export function CanvasView(props: Props) {
               </div>
             )
           )
+        )}
+        {editable && edgeShape && (
+          <div
+            className="canvas-handle canvas-edge-end"
+            style={{ left: edgeShape.geo.end.x, top: edgeShape.geo.end.y }}
+            onPointerDown={(e) => onEdgeEndDown(e, edgeShape.edge, edgeShape.geo.end)}
+          />
         )}
         {marquee && (
           <div
