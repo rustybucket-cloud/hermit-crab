@@ -1036,6 +1036,16 @@ button {
   touch-action: none;
 }
 
+.canvas-view.grab,
+.canvas-view.grab .canvas-world * {
+  cursor: grab;
+}
+
+.canvas-view.grab:active,
+.canvas-view.grab:active .canvas-world * {
+  cursor: grabbing;
+}
+
 .canvas-view a,
 .canvas-view img {
   -webkit-user-drag: none;

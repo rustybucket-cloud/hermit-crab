@@ -71,6 +71,7 @@ import { CardEditor } from './CardEditor'
 import { touch } from '../device'
 
 const hermit = window.hermit
+const mac = hermit.platform === 'darwin'
 
 const VIEWS_KEY = 'hermit:canvas-views'
 const MIN_ZOOM = 0.1
@@ -103,7 +104,7 @@ interface View {
 
 type Gesture =
   | { kind: 'pan'; start: Point; view: View; moved: boolean }
-  | { kind: 'select'; start: Point; base: ReadonlySet<string> }
+  | { kind: 'select'; start: Point; client: Point; base: ReadonlySet<string>; moved: boolean }
   | { kind: 'move'; start: Point; origins: Map<string, Point>; lead: string; moved: boolean }
   | { kind: 'resize'; id: string; start: Point; origin: Rect }
   | { kind: 'connect'; from: string; side: CanvasSide }
@@ -132,6 +133,9 @@ const snap = (v: number) => Math.round(v / SNAP) * SNAP
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
 const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16)
 const isHeading = (text: string) => /^#{1,6}\s+\S[^\n]*$/.test(text.trim())
+/** Whether a click adds to the selection, or takes away from it, rather than replacing it. */
+const adds = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) =>
+  e.shiftKey || e.metaKey || (e.ctrlKey && !mac)
 
 const colorStyle = (color?: CanvasColor): CSSProperties =>
   (color ? { '--card': /^\d$/.test(color) ? `var(--canvas-${color})` : color } : {}) as CSSProperties
@@ -198,6 +202,7 @@ export function CanvasView(props: Props) {
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [link, setLink] = useState<Link | null>(null)
   const [picker, setPicker] = useState(false)
+  const [grab, setGrab] = useState(false)
   const [noteTexts, setNoteTexts] = useState(new Map<string, { version: number; content: string }>())
 
   const host = useRef<HTMLDivElement>(null)
@@ -217,6 +222,8 @@ export function CanvasView(props: Props) {
   // The last tap, to tell a double-tap; and when a finger last touched, so the browser's own dblclick is ignored.
   const lastTap = useRef<{ at: number; point: Point; target: string } | null>(null)
   const lastTouch = useRef(0)
+  // Space held down, so dragging pans.
+  const space = useRef(false)
 
   const sheetsById = useMemo(() => new Map(props.sheets.map((s) => [s.id, s])), [props.sheets])
   const nodesById = useMemo(() => new Map(canvas.nodes.map((n) => [n.id, n])), [canvas.nodes])
@@ -532,25 +539,38 @@ export function CanvasView(props: Props) {
   /** The browser's own double-click, unless it comes from a finger, whose double-taps are handled above. */
   const fromMouse = () => Date.now() - lastTouch.current > 800
 
+  const startSelecting = (client: Point, base: ReadonlySet<string>) => {
+    gesture.current = { kind: 'select', start: toWorld(client.x, client.y), client, base, moved: false }
+  }
+
   const onBackgroundDown = (e: ReactPointerEvent) => {
     setPicker(false)
     if (fingerDown(e)) return
-    if (e.button === 1 || (e.button === 0 && !e.shiftKey)) {
-      gesture.current = { kind: 'pan', start: { x: e.clientX, y: e.clientY }, view: viewRef.current, moved: e.button === 1 }
+    const client = { x: e.clientX, y: e.clientY }
+    // A finger pans, as does the middle button or dragging with Space held; otherwise a drag draws a selection.
+    if (e.button === 1 || (e.button === 0 && (e.pointerType !== 'mouse' || space.current))) {
+      gesture.current = { kind: 'pan', start: client, view: viewRef.current, moved: e.button === 1 }
     } else if (e.button === 0) {
-      gesture.current = { kind: 'select', start: toWorld(e.clientX, e.clientY), base: selected }
+      startSelecting(client, adds(e) ? selected : new Set())
     }
   }
 
+  /** Touching and holding empty space, which stands in for a right-click, turns the pan into a selection. */
+  const onBackgroundMenu = (e: MouseEvent) => {
+    e.preventDefault()
+    if (gesture.current?.kind === 'pan' && fingers.current.size === 1) startSelecting({ x: e.clientX, y: e.clientY }, new Set())
+  }
+
   const onNodeDown = (e: ReactPointerEvent, node: CanvasNode) => {
-    if (e.button !== 0) return
+    // With Space held, a drag pans wherever it starts.
+    if (e.button !== 0 || (space.current && e.pointerType === 'mouse')) return
     e.stopPropagation()
     if (fingerDown(e)) return
     setPicker(false)
     setSelectedEdge(null)
     if (editing === node.id) return
     let next = selected
-    if (e.shiftKey) {
+    if (adds(e)) {
       const toggled = new Set(selected)
       if (toggled.has(node.id)) toggled.delete(node.id)
       else toggled.add(node.id)
@@ -605,9 +625,14 @@ export function CanvasView(props: Props) {
       g.moved = true
       setView({ ...g.view, x: g.view.x + dx, y: g.view.y + dy })
     } else if (g.kind === 'select') {
+      if (!g.moved && Math.hypot(e.clientX - g.client.x, e.clientY - g.client.y) < 3) return
+      g.moved = true
       const area = rectFrom(g.start, toWorld(e.clientX, e.clientY))
       setMarquee(area)
-      setSelected(new Set([...g.base, ...canvas.nodes.filter((n) => intersects(n, area)).map((n) => n.id)]))
+      setSelectedEdge(null)
+      // A group only counts once it's wholly inside, so a selection reaching into one doesn't carry all its cards.
+      const hits = canvas.nodes.filter((n) => (n.type === 'group' ? inside(n, area) : intersects(n, area)))
+      setSelected(new Set([...g.base, ...hits.map((n) => n.id)]))
     } else if (g.kind === 'move') {
       const p = toWorld(e.clientX, e.clientY)
       let dx = p.x - g.start.x
@@ -660,9 +685,14 @@ export function CanvasView(props: Props) {
       if (isDoubleTap(e, '') && editable) addCard(toWorld(e.clientX, e.clientY))
     } else if (g.kind === 'select') {
       setMarquee(null)
+      // Just a click on empty space.
+      if (!g.moved) {
+        setSelected(g.base)
+        setSelectedEdge(null)
+      }
     } else if (g.kind === 'move') {
       if (g.moved) end()
-      else if (!e.shiftKey && selected.size > 1) setSelected(new Set([g.lead]))
+      else if (!adds(e) && selected.size > 1) setSelected(new Set([g.lead]))
       // Tapped twice, a card opens for editing, as a double-click does.
       if (!g.moved && isDoubleTap(e, g.lead)) {
         const node = nodesById.get(g.lead)
@@ -728,7 +758,14 @@ export function CanvasView(props: Props) {
     const move = (e: PointerEvent) => handlers.current.onPointerMove(e)
     const up = (e: PointerEvent) => handlers.current.onPointerUp(e)
     const wheel = (e: WheelEvent) => handlers.current.onWheel(e)
+    const release = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== ' ') return
+      space.current = false
+      setGrab(false)
+    }
     const el = host.current!
+    window.addEventListener('keyup', release)
+    window.addEventListener('blur', release)
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
@@ -737,6 +774,8 @@ export function CanvasView(props: Props) {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
+      window.removeEventListener('keyup', release)
+      window.removeEventListener('blur', release)
       el.removeEventListener('wheel', wheel)
     }
   }, [])
@@ -768,6 +807,10 @@ export function CanvasView(props: Props) {
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && editable) {
       handled()
       deleteSelection()
+    } else if (e.key === ' ' && !mod) {
+      handled()
+      space.current = true
+      setGrab(true)
     } else if (e.key === 'Escape') {
       handled()
       setPicker(false)
@@ -999,7 +1042,9 @@ export function CanvasView(props: Props) {
         ? toScreen({ x: edgeShape.geo.mid.x, y: edgeShape.geo.mid.y - 24 / view.zoom })
         : selectionBox && toScreen({ x: selectionBox.x + selectionBox.width / 2, y: selectionBox.y })
   const single = selectedNodes.length === 1 ? selectedNodes[0] : null
-  const activeColor = edgeShape ? edgeShape.edge.color : single?.color
+  // Shown as set only when everything selected agrees; null when it doesn't.
+  const colors = new Set((edgeShape ? [edgeShape.edge] : selectedNodes).map((n) => n.color))
+  const activeColor = colors.size === 1 ? [...colors][0] : null
   const selectedTexts = edgeShape ? [] : selectedNodes.filter((n) => n.type === 'text')
   // Shown as set only when every selected card agrees.
   const alignments = new Set(selectedTexts.map(textAlign))
@@ -1011,7 +1056,7 @@ export function CanvasView(props: Props) {
   return (
     <div
       ref={host}
-      className="canvas-view"
+      className={`canvas-view${grab ? ' grab' : ''}`}
       tabIndex={0}
       style={{
         backgroundSize: `${gridSize}px ${gridSize}px`,
@@ -1019,6 +1064,7 @@ export function CanvasView(props: Props) {
       }}
       onPointerDown={onBackgroundDown}
       onDoubleClick={(e) => editable && fromMouse() && addCard(toWorld(e.clientX, e.clientY))}
+      onContextMenu={onBackgroundMenu}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
       onDragOver={onDragOver}
@@ -1145,7 +1191,7 @@ export function CanvasView(props: Props) {
           onDoubleClick={(e) => e.stopPropagation()}
         >
           <button
-            className={`canvas-swatch none${activeColor ? '' : ' current'}`}
+            className={`canvas-swatch none${activeColor === undefined ? ' current' : ''}`}
             title="No Colour"
             onClick={() => setColor(undefined)}
           />
