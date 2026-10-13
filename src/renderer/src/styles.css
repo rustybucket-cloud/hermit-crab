@@ -1269,7 +1269,8 @@ button {
 
 .canvas-node.heading .canvas-markdown {
   display: flex;
-  align-items: center;
+  /* A heading too tall for its card keeps its first lines rather than overflowing both ways. */
+  align-items: safe center;
   padding: 0 6px;
   font-family: var(--font-ui);
 }
@@ -1295,10 +1296,9 @@ button {
 }
 
 .canvas-node.heading :is(h1, h2, h3, h4, h5, h6) {
+  min-width: 0;
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .canvas-text-editor {
