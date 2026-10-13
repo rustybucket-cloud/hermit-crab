@@ -129,6 +129,24 @@ export const HeadingIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
+export const AlignLeftIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h16M4 10h10M4 14h16M4 18h10" />
+  </svg>
+)
+
+export const AlignCenterIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h16M7 10h10M4 14h16M7 18h10" />
+  </svg>
+)
+
+export const AlignRightIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h16M10 10h10M4 14h16M10 18h10" />
+  </svg>
+)
+
 export const NoteLinkIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />

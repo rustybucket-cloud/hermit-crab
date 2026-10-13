@@ -19,10 +19,14 @@ interface NodeBase {
   color?: CanvasColor
 }
 
+export type TextAlign = 'left' | 'center' | 'right'
+
 /** A card of Markdown. A card that's only a heading shows as a heading, without a card around it. */
 export interface TextNode extends NodeBase {
   type: 'text'
   text: string
+  /** Kept where Obsidian's Advanced Canvas plugin keeps it, so cards line up the same there. Left if unset. */
+  styleAttributes?: { textAlign?: TextAlign; [key: string]: unknown }
 }
 
 /** A note, sheet or image from the project, by its path within the project, such as `Notes/<name>.md`. */
@@ -79,6 +83,20 @@ const IMAGE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i
 export const isImageFile = (file: string) => IMAGE.test(file)
 
 const SIDES: CanvasSide[] = ['top', 'right', 'bottom', 'left']
+
+/** How a card's text lines up. */
+export const textAlign = (node: TextNode): TextAlign => {
+  const align = node.styleAttributes?.textAlign
+  return align === 'center' || align === 'right' ? align : 'left'
+}
+
+/** A card with its text lined up a new way, dropping the setting when it's back to left. */
+export function withTextAlign(node: TextNode, align: TextAlign): TextNode {
+  const { textAlign: _, ...attributes } = node.styleAttributes ?? {}
+  const styleAttributes = align === 'left' ? attributes : { ...attributes, textAlign: align }
+  const { styleAttributes: __, ...rest } = node
+  return Object.keys(styleAttributes).length ? { ...rest, styleAttributes } : rest
+}
 
 /** Read a canvas file, dropping anything too broken to show. Throws if it isn't JSON at all. */
 export function parseCanvas(raw: string): CanvasData {

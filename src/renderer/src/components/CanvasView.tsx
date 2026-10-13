@@ -21,12 +21,15 @@ import {
   serializeCanvas,
   sheetFile,
   sheetIdOfFile,
+  textAlign,
+  withTextAlign,
   type CanvasColor,
   type CanvasData,
   type CanvasEdge,
   type CanvasNode,
   type CanvasSide,
   type FileNode,
+  type TextAlign,
   type TextNode
 } from '../../../shared/canvas'
 import type { SheetSummary } from '../../../shared/types'
@@ -46,6 +49,9 @@ import {
 } from '../canvas/geometry'
 import { placeName } from '../sections'
 import {
+  AlignCenterIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
   ArrowIcon,
   CardIcon,
   ComposeIcon,
@@ -81,6 +87,12 @@ const COLORS: [CanvasColor, string][] = [
   ['4', 'Green'],
   ['5', 'Cyan'],
   ['6', 'Purple']
+]
+
+const ALIGNMENTS: [TextAlign, string, typeof AlignLeftIcon][] = [
+  ['left', 'Align Left', AlignLeftIcon],
+  ['center', 'Align Center', AlignCenterIcon],
+  ['right', 'Align Right', AlignRightIcon]
 ]
 
 interface View {
@@ -457,6 +469,9 @@ export function CanvasView(props: Props) {
     if (selectedEdge) commit(patchEdge(selectedEdge, paint))
     else commit(patchNodes(selected, paint))
   }
+
+  const setAlign = (align: TextAlign) =>
+    commit(patchNodes(selected, (n) => (n.type === 'text' ? withTextAlign(n, align) : n)))
 
   /** Arrows go one way, both ways, then neither. */
   const cycleArrows = (id: string) =>
@@ -873,11 +888,13 @@ export function CanvasView(props: Props) {
     const isSelected = selected.has(node.id)
     const isEditing = editing === node.id
     const heading = node.type === 'text' && isHeading(node.text)
+    const align = node.type === 'text' ? textAlign(node) : 'left'
     const className = [
       'canvas-node',
       `type-${node.type}`,
       node.type === 'file' && isImageFile(node.file) && 'image',
       heading && 'heading',
+      align !== 'left' && `align-${align}`,
       node.color && 'colored',
       isSelected && 'selected',
       isEditing && 'editing',
@@ -983,6 +1000,10 @@ export function CanvasView(props: Props) {
         : selectionBox && toScreen({ x: selectionBox.x + selectionBox.width / 2, y: selectionBox.y })
   const single = selectedNodes.length === 1 ? selectedNodes[0] : null
   const activeColor = edgeShape ? edgeShape.edge.color : single?.color
+  const selectedTexts = edgeShape ? [] : selectedNodes.filter((n) => n.type === 'text')
+  // Shown as set only when every selected card agrees.
+  const alignments = new Set(selectedTexts.map(textAlign))
+  const activeAlign = alignments.size === 1 ? [...alignments][0] : null
 
   const gridSize = GRID * view.zoom * (view.zoom < 0.5 ? 5 : 1)
   const pickable = props.sheets.filter((s) => s.id !== sheetId)
@@ -1138,6 +1159,21 @@ export function CanvasView(props: Props) {
             />
           ))}
           <span className="canvas-floating-divider" />
+          {selectedTexts.length > 0 && (
+            <>
+              {ALIGNMENTS.map(([align, title, Icon]) => (
+                <button
+                  key={align}
+                  className={`icon-button${activeAlign === align ? ' on' : ''}`}
+                  title={title}
+                  onClick={() => setAlign(align)}
+                >
+                  <Icon />
+                </button>
+              ))}
+              <span className="canvas-floating-divider" />
+            </>
+          )}
           {edgeShape && (
             <>
               <button className="icon-button" title="Arrows" onClick={() => cycleArrows(edgeShape.edge.id)}>

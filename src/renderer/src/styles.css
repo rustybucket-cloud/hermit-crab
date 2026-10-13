@@ -1255,18 +1255,6 @@ button {
   font-size: 13.5px;
 }
 
-/* A card that's only a heading reads as a heading on the board, not as a card. */
-.canvas-node.heading,
-.canvas-node.heading.colored {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-}
-
-.canvas-node.heading:hover {
-  border-color: var(--border);
-}
-
 .canvas-node.heading .canvas-markdown {
   display: flex;
   /* A heading too tall for its card keeps its first lines rather than overflowing both ways. */
@@ -1362,6 +1350,23 @@ button {
 
 .canvas-node.heading .canvas-card-editor .cm-h4 {
   font-size: 18px;
+}
+
+/* A card's text lines up as it's set to, while it's edited too. */
+.canvas-node.align-center :is(.canvas-markdown, .cm-content) {
+  text-align: center;
+}
+
+.canvas-node.align-right :is(.canvas-markdown, .cm-content) {
+  text-align: right;
+}
+
+.canvas-node.heading.align-center .canvas-markdown {
+  justify-content: center;
+}
+
+.canvas-node.heading.align-right .canvas-markdown {
+  justify-content: flex-end;
 }
 
 .canvas-node.image,
