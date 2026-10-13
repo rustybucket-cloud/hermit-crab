@@ -61,6 +61,7 @@ import {
 } from './Icons'
 import { SHEET_DRAG_TYPE } from './LibraryPane'
 import { renderMarkdown } from './Preview'
+import { CardEditor } from './CardEditor'
 import { touch } from '../device'
 
 const hermit = window.hermit
@@ -729,7 +730,7 @@ export function CanvasView(props: Props) {
 
   const onKeyDown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement
-    if (target.closest('input, textarea')) return
+    if (target.closest('input, textarea, [contenteditable]')) return
     const mod = e.metaKey || e.ctrlKey
     const key = e.key.toLowerCase()
     const handled = () => {
@@ -776,7 +777,7 @@ export function CanvasView(props: Props) {
   }
 
   const onPaste = (e: ClipboardEvent) => {
-    if ((e.target as HTMLElement).closest('input, textarea') || !editable) return
+    if ((e.target as HTMLElement).closest('input, textarea, [contenteditable]') || !editable) return
     const files = [...e.clipboardData.files]
     const text = e.clipboardData.getData('text/plain')
     if (files.some((f) => f.type.startsWith('image/'))) {
@@ -871,7 +872,7 @@ export function CanvasView(props: Props) {
   const renderNode = (node: CanvasNode) => {
     const isSelected = selected.has(node.id)
     const isEditing = editing === node.id
-    const heading = node.type === 'text' && !isEditing && isHeading(node.text)
+    const heading = node.type === 'text' && isHeading(node.text)
     const className = [
       'canvas-node',
       `type-${node.type}`,
@@ -904,28 +905,16 @@ export function CanvasView(props: Props) {
         <div className="canvas-node-body">
           {node.type === 'text' &&
             (isEditing ? (
-              <textarea
-                className="canvas-text-editor"
-                value={node.text}
-                autoFocus
-                spellCheck
-                onFocus={(e) => {
-                  const el = e.currentTarget
-                  // A new heading's placeholder is selected, ready to type over.
-                  if (node.text === '# Heading') el.setSelectionRange(2, el.value.length)
-                  else el.setSelectionRange(el.value.length, el.value.length)
-                }}
-                onChange={(e) => {
-                  const el = e.currentTarget
-                  const text = el.value
+              <CardEditor
+                text={node.text}
+                // A new heading's placeholder is selected, ready to type over.
+                select={node.text === '# Heading' ? { from: 2, to: node.text.length } : undefined}
+                onChange={(text, scrollHeight) => {
                   // Grow the card to fit what's written.
-                  const height = Math.max(node.height, el.scrollHeight + 2)
+                  const height = Math.max(node.height, scrollHeight + 2)
                   setCanvas(patchNodes(new Set([node.id]), (n) => ({ ...n, text, height }) as TextNode), true)
                 }}
-                onBlur={finishEditing}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') e.currentTarget.blur()
-                }}
+                onDone={finishEditing}
               />
             ) : (
               <Markdown className={`canvas-markdown${heading ? '' : ' canvas-scroll'}`} text={node.text} />

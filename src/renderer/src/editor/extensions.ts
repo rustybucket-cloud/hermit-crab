@@ -1,7 +1,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { HighlightStyle, syntaxHighlighting, type TagStyle } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { EditorSelection, EditorState, Prec, RangeSetBuilder, type Extension, type SelectionRange } from '@codemirror/state'
 import {
@@ -21,12 +21,8 @@ import { fountain } from './fountain'
 
 // ── Look ────────────────────────────────────────────────────────────────────
 
-/** Markdown syntax stays visible but recedes, so the prose is what you see. */
-const markdownStyle = HighlightStyle.define([
-  { tag: t.heading1, fontSize: '1.55em', fontWeight: '700', lineHeight: '1.3' },
-  { tag: t.heading2, fontSize: '1.3em', fontWeight: '700', lineHeight: '1.35' },
-  { tag: t.heading3, fontSize: '1.12em', fontWeight: '700' },
-  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: '700' },
+/** Everything but headings, which sheets and canvas cards size differently. */
+const markdownMarks: TagStyle[] = [
   { tag: t.strong, fontWeight: '700' },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strikethrough, textDecoration: 'line-through', color: 'var(--text-muted)' },
@@ -39,6 +35,24 @@ const markdownStyle = HighlightStyle.define([
   { tag: [t.keyword, t.operatorKeyword, t.modifier], color: 'var(--syn-keyword)' },
   { tag: [t.number, t.bool, t.null, t.atom], color: 'var(--syn-number)' },
   { tag: [t.function(t.variableName), t.definition(t.variableName), t.typeName, t.className], color: 'var(--syn-def)' }
+]
+
+/** Markdown syntax stays visible but recedes, so the prose is what you see. */
+const markdownStyle = HighlightStyle.define([
+  { tag: t.heading1, fontSize: '1.55em', fontWeight: '700', lineHeight: '1.3' },
+  { tag: t.heading2, fontSize: '1.3em', fontWeight: '700', lineHeight: '1.35' },
+  { tag: t.heading3, fontSize: '1.12em', fontWeight: '700' },
+  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: '700' },
+  ...markdownMarks
+])
+
+/** On a canvas card, headings are sized by the stylesheet, so they match the card once it's rendered. */
+const cardStyle = HighlightStyle.define([
+  { tag: t.heading1, class: 'cm-h1' },
+  { tag: t.heading2, class: 'cm-h2' },
+  { tag: t.heading3, class: 'cm-h3' },
+  { tag: [t.heading4, t.heading5, t.heading6], class: 'cm-h4' },
+  ...markdownMarks
 ])
 
 const theme = EditorView.theme({
@@ -271,14 +285,18 @@ const FORMAT_KEYS: Record<FormatCommand, string> = {
 
 // ── Assembly ────────────────────────────────────────────────────────────────
 
+function formatKeymap(format: ContentFormat): Extension {
+  const commands = Object.entries(formatCommands[format]) as [FormatCommand, Command][]
+  return Prec.high(keymap.of(commands.map(([name, run]) => ({ key: FORMAT_KEYS[name], run }))))
+}
+
 /** Styling and formatting keys for the sheet's format. Swapped in place if a project changes format. */
 export function formatExtensions(format: ContentFormat): Extension[] {
-  const commands = Object.entries(formatCommands[format]) as [FormatCommand, Command][]
   return [
     format === 'fountain'
       ? fountain
       : [markdown({ base: markdownLanguage, codeLanguages: languages }), syntaxHighlighting(markdownStyle)],
-    Prec.high(keymap.of(commands.map(([name, run]) => ({ key: FORMAT_KEYS[name], run }))))
+    formatKeymap(format)
   ]
 }
 
@@ -315,5 +333,36 @@ export function plainExtensions(): Extension[] {
     search({ top: false }),
     theme,
     keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab])
+  ]
+}
+
+// ── Canvas cards ────────────────────────────────────────────────────────────
+
+/** Fonts and padding come from the card, so editing looks like the card it becomes. */
+const cardTheme = EditorView.theme({
+  '&': { height: '100%', backgroundColor: 'transparent', color: 'inherit' },
+  '&.cm-focused': { outline: 'none' },
+  // The card grows to fit what's written, so there's nothing to scroll.
+  '.cm-scroller': { fontFamily: 'inherit', lineHeight: 'inherit', overflow: 'hidden' },
+  '.cm-content': { padding: '12px 16px', caretColor: 'var(--accent)' },
+  '.cm-line': { padding: '0' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection': {
+    backgroundColor: 'var(--selection) !important'
+  }
+})
+
+/** For a canvas card's text: Markdown styled as it's typed, without a sheet's search and focus modes. */
+export function cardExtensions(): Extension[] {
+  return [
+    history(),
+    drawSelection(),
+    EditorView.lineWrapping,
+    EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }),
+    markdown({ base: markdownLanguage, codeLanguages: languages }),
+    syntaxHighlighting(cardStyle),
+    cardTheme,
+    formatKeymap('markdown'),
+    keymap.of([...historyKeymap, ...defaultKeymap])
   ]
 }

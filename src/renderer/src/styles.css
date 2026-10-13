@@ -1301,20 +1301,67 @@ button {
   overflow-wrap: anywhere;
 }
 
-.canvas-text-editor {
-  display: block;
-  width: 100%;
+.canvas-card-editor {
   height: 100%;
-  padding: 12px 16px;
-  border: none;
-  outline: none;
-  resize: none;
-  background: transparent;
   color: var(--text);
   font-family: var(--editor-font);
   font-size: 15px;
   line-height: 1.55;
   user-select: text;
+}
+
+/* Headings take their rendered size as soon as they're typed. */
+.canvas-card-editor :is(.cm-h1, .cm-h2, .cm-h3, .cm-h4) {
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.canvas-card-editor .cm-h1 {
+  font-size: 1.6em;
+}
+
+.canvas-card-editor .cm-h2 {
+  font-size: 1.35em;
+}
+
+.canvas-card-editor .cm-h3 {
+  font-size: 1.15em;
+}
+
+/* Editing a heading card keeps it looking like the heading it is. */
+.canvas-node.heading .canvas-card-editor {
+  display: flex;
+  align-items: center;
+  font-family: var(--font-ui);
+}
+
+.canvas-node.heading.colored .canvas-card-editor {
+  color: var(--card);
+}
+
+.canvas-node.heading .canvas-card-editor .cm-editor {
+  flex: 1;
+  height: auto;
+}
+
+.canvas-node.heading .canvas-card-editor .cm-content {
+  padding: 0 6px;
+}
+
+.canvas-node.heading .canvas-card-editor .cm-h1 {
+  font-size: 34px;
+}
+
+.canvas-node.heading .canvas-card-editor .cm-h2 {
+  font-size: 27px;
+}
+
+.canvas-node.heading .canvas-card-editor .cm-h3 {
+  font-size: 22px;
+}
+
+.canvas-node.heading .canvas-card-editor .cm-h4 {
+  font-size: 18px;
 }
 
 .canvas-node.image,
@@ -2640,6 +2687,7 @@ button {
 .platform-ios input,
 .platform-ios select,
 .platform-ios textarea,
+.platform-ios .canvas-card-editor,
 .platform-ios .rename-field {
   font-size: 16px;
 }
