@@ -73,7 +73,21 @@ export const SheetsIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
-export const CloseIcon = (p: SVGProps<SVGSVGElement>) => (
+export const SplitRightIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M12 4v16" />
+  </svg>
+)
+
+export const SplitDownIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 12h18" />
+  </svg>
+)
+
+export const CloseIcon =(p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M6 6l12 12M18 6 6 18" />
   </svg>

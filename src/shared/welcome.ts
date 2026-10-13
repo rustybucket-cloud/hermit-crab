@@ -62,9 +62,12 @@ Use **Preview** (${mod}Shift+P) to see the rendered result.
 | Preview | ${mod}Shift+P |
 | Focus mode | ${mod}Shift+F |
 | Typewriter mode | ${mod}Shift+T |
+| Switch pane | Ctrl+Tab |
 | Text size | ${mod}+ / ${mod}- / ${mod}0 |
 
 **Focus mode** dims everything except the paragraph you're writing. **Typewriter mode** keeps the line you're on in the middle of the screen.
+
+To see two sheets at once, such as a chapter beside its notes or a scene beside the canvas that plans it, split the editor with the button at its top right, side by side or one above the other. Or right-click a sheet and choose **Open in Split View**.
 
 When you're done, use **File → Export** to save a sheet or a whole project as Markdown, HTML or PDF. Exporting a project exports its content; notes stay behind.
 `
@@ -112,6 +115,8 @@ Tap the eye at the top of the editor to **preview** the rendered result.
   `# Modes and More
 
 **Focus mode** dims everything except the paragraph you're writing. **Typewriter mode** keeps the line you're on in the middle of the screen. Both are in the **⋯** menu at the top of the editor, along with find, text size and export.
+
+On an iPad, the split button at the top of the editor shows two sheets at once, side by side or one above the other.
 
 Export a sheet, or a whole project, as Markdown, HTML or PDF, and share it or save it to Files. Exporting a project exports its content; notes stay behind.
 

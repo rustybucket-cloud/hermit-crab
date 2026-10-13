@@ -1,5 +1,14 @@
 import type { Text } from '@codemirror/state'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 import { isCanvasId, summarizeCanvas } from '../../shared/canvas'
 import { countWords, readingMinutes } from '../../shared/text'
 import type {
@@ -20,7 +29,19 @@ import { CanvasView } from './components/CanvasView'
 import { Editor, type EditorHandle } from './components/Editor'
 import { ElementPicker } from './components/ElementPicker'
 import { FormatBar } from './components/FormatBar'
-import { BackIcon, EyeIcon, FocusIcon, MoreIcon, PlusIcon, SheetsIcon, SidebarIcon, TypewriterIcon } from './components/Icons'
+import {
+  BackIcon,
+  CloseIcon,
+  EyeIcon,
+  FocusIcon,
+  MoreIcon,
+  PlusIcon,
+  SheetsIcon,
+  SidebarIcon,
+  SplitDownIcon,
+  SplitRightIcon,
+  TypewriterIcon
+} from './components/Icons'
 import { LibraryPane } from './components/LibraryPane'
 import { MergeEditor } from './components/MergeEditor'
 import { Preview } from './components/Preview'
@@ -41,10 +62,12 @@ const hermit = window.hermit
 
 type EditorFont = 'sans' | 'serif' | 'mono'
 
+/** How two panes share the editor: side by side, or one above the other. */
+type SplitDirection = 'row' | 'column'
+
 interface Prefs {
   showLibrary: boolean
   showSheets: boolean
-  preview: boolean
   focus: boolean
   // Side panes as they were when focus mode began, restored on exit.
   panesBeforeFocus: { showLibrary: boolean; showSheets: boolean } | null
@@ -53,20 +76,24 @@ interface Prefs {
   dialect: GrammarDialect
   font: EditorFont
   fontSize: number
+  split: SplitDirection
+  /** The first pane's share of the editor when it's split. */
+  splitRatio: number
 }
 
 const DEFAULT_PREFS: Prefs = {
   // A narrow iPad has room for the sheet list beside the editor, but not the library too.
   showLibrary: !(touch && window.innerWidth < 1000),
   showSheets: true,
-  preview: false,
   focus: false,
   panesBeforeFocus: null,
   typewriter: false,
   grammar: true,
   dialect: defaultDialect(),
   font: 'sans',
-  fontSize: 17
+  fontSize: 17,
+  split: 'row',
+  splitRatio: 0.5
 }
 
 const FONTS: Record<EditorFont, string> = {
@@ -82,8 +109,12 @@ const LAST_KEY = 'hermit:last'
 interface Last {
   /** Missing from before collections. */
   collection?: string
+  /** The sheet in the pane last worked in. */
   projectId?: string
   sheetId?: string
+  /** Every pane's sheet, in order, and which of them was last worked in. Missing from before split panes. */
+  panes?: { projectId: string; sheetId: string; preview?: boolean }[]
+  active?: number
 }
 
 /** Where things were left in a collection. */
@@ -117,12 +148,38 @@ interface OpenSheet {
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error'
 
+/** Unsaved text, waiting to be written. A canvas's edits arrive as its whole file. */
+interface SaveJob {
+  projectId: string
+  sheetId: string
+  doc: Text | string
+}
+
 /** What the status bar counts: words and characters, or for a canvas, its cards and connections. */
 interface Stats {
   words: number
   chars: number
   canvas?: string
 }
+
+/** One side of the editor, when it's split; the whole of it otherwise. */
+interface Pane {
+  id: number
+  open: OpenSheet | null
+  preview: boolean
+  stats: Stats
+  /** The screenplay element the caret is in, or null outside a screenplay. */
+  element: CurrentElement | null
+}
+
+let paneCount = 0
+const newPane = (preview = false): Pane => ({
+  id: ++paneCount,
+  open: null,
+  preview,
+  stats: { words: 0, chars: 0 },
+  element: null
+})
 
 /** The project to fall back on: the first that isn't archived. */
 const firstActive = (list: ProjectSummary[]) => list.find((p) => !p.archived)?.id ?? null
@@ -139,9 +196,13 @@ function statsOf(sheetId: string, text: string): Stats {
 export default function App() {
   const [prefs, setPrefs] = useState<Prefs>(() => loadJson(PREFS_KEY, DEFAULT_PREFS))
   const [projects, setProjects] = useState<ProjectSummary[]>([])
+  // The project the sheet list shows: the active pane's.
   const [projectId, setProjectId] = useState<string | null>(null)
+  const projectIdRef = useRef<string | null>(null)
   // Every sheet in the project, both sections; the list shows the active section's.
   const [sheets, setSheets] = useState<SheetSummary[]>([])
+  // Every sheet of each project loaded so far, for a canvas in a pane whose project the list isn't showing.
+  const [sheetCache, setSheetCache] = useState<Record<string, SheetSummary[]>>({})
   const [section, setSection] = useState<Section>('content')
   // Archived sheets of both sections, most recently archived first.
   const [archived, setArchived] = useState<SheetSummary[]>([])
@@ -153,7 +214,12 @@ export default function App() {
   const [renamingSubsection, setRenamingSubsection] = useState<string | null>(null)
   // The canvas being named in the list.
   const [renamingSheet, setRenamingSheet] = useState<string | null>(null)
-  const [current, setCurrent] = useState<OpenSheet | null>(null)
+  // The editor's panes, in order: one, or two when it's split. The refs are always up to date; the state follows.
+  const [panes, setPanes] = useState<Pane[]>(() => [newPane()])
+  const panesRef = useRef(panes)
+  // The pane the sheet list, toolbar and menus act on.
+  const [activeId, setActiveId] = useState(panes[0].id)
+  const activeRef = useRef(activeId)
   const [folders, setFolders] = useState<string[]>([])
   const [renamingProject, setRenamingProject] = useState<string | null>(null)
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
@@ -164,8 +230,6 @@ export default function App() {
   const [renamingCollection, setRenamingCollection] = useState(false)
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<Set<string> | null>(null)
-  const [stats, setStats] = useState<Stats>({ words: 0, chars: 0 })
-  const [element, setElement] = useState<CurrentElement | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [ready, setReady] = useState(false)
   const [libraryError, setLibraryError] = useState<string | null>(null)
@@ -184,65 +248,112 @@ export default function App() {
   )
   const editorFocused = useFocusWithin('.editor-host')
 
-  const editor = useRef<EditorHandle>(null)
-  // A canvas's edits arrive as its whole file.
-  const pending = useRef<{ projectId: string; sheetId: string; doc: Text | string } | null>(null)
-  const liveDoc = useRef<Text | string>('')
+  // Each text pane's editor, by pane.
+  const editors = useRef(new Map<number, EditorHandle>())
+  // Unsaved edits, by pane.
+  const pending = useRef(new Map<number, SaveJob>())
+  // Each pane's text as it stands, for previewing it.
+  const liveDocs = useRef(new Map<number, Text | string>())
   const saveTimer = useRef<number | undefined>(undefined)
-  const statsTimer = useRef<number | undefined>(undefined)
+  const statsTimers = useRef(new Map<number, number>())
   const loadSeq = useRef(0)
-  // The sheet last open in each project section and archive, so switching back returns to it.
+  // The latest load into each pane, so a slower earlier one doesn't land on top of it.
+  const paneLoads = useRef(new Map<number, number>())
+  // The sheet last open in each project section and archive, for a new pane to open beside the one in another.
   const lastInSection = useRef(new Map<string, string>())
 
   useEffect(() => localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)), [prefs])
 
-  /** Note the open sheet, so the app, and its collection, open on it next time. */
-  const remember = (pid: string, sheetId: string) => {
-    const last: Last = { collection: collectionRef.current, projectId: pid, sheetId }
+  // The pane being worked in, and what it shows.
+  const activePane = panes.find((p) => p.id === activeId) ?? panes[0]
+  const current = activePane.open
+  const split = panes.length > 1 && !compact
+
+  const setPaneList = (next: Pane[]) => {
+    panesRef.current = next
+    setPanes(next)
+  }
+
+  const updatePane = (id: number, patch: Partial<Pane> | ((pane: Pane) => Partial<Pane>)) =>
+    setPaneList(
+      panesRef.current.map((p) => (p.id === id ? { ...p, ...(typeof patch === 'function' ? patch(p) : patch) } : p))
+    )
+
+  const setActive = (id: number) => {
+    activeRef.current = id
+    setActiveId(id)
+  }
+
+  /** Note each pane's sheet, so the app, and its collection, open on them next time. */
+  const remember = () => {
+    const open = panesRef.current.flatMap((p) => (p.open ? [p] : []))
+    const active = open.find((p) => p.id === activeRef.current)?.open
+    if (!active) return
+    const last: Last = {
+      collection: collectionRef.current,
+      projectId: active.projectId,
+      sheetId: active.sheet.id,
+      panes: open.map((p) => ({ projectId: p.open!.projectId, sheetId: p.open!.sheet.id, preview: p.preview })),
+      active: open.findIndex((p) => p.id === activeRef.current)
+    }
     localStorage.setItem(LAST_KEY, JSON.stringify(last))
     localStorage.setItem(`${LAST_KEY}:${collectionRef.current}`, JSON.stringify(last))
   }
+
+  const layoutKey = JSON.stringify([activeId, panes.map((p) => [p.open?.projectId, p.open?.sheet.id, p.preview])])
+  useEffect(() => {
+    if (ready) remember()
+  }, [layoutKey, ready])
 
   // ── Saving ────────────────────────────────────────────────────────────────
 
   const flush = useCallback(async () => {
     window.clearTimeout(saveTimer.current)
-    const job = pending.current
-    if (!job) return
-    pending.current = null
+    const jobs = [...pending.current]
+    if (!jobs.length) return
+    pending.current.clear()
     setSaveState('saving')
-    try {
-      const summary = await hermit.writeSheet(job.projectId, job.sheetId, job.doc.toString())
-      const replace = (prev: SheetSummary[]) => prev.map((s) => (s.id === summary.id ? summary : s))
-      if (summary.archived) setArchived(replace)
-      else setSheets(replace)
-      setSaveState(pending.current ? 'unsaved' : 'saved')
-    } catch (err) {
-      console.error('Save failed', err)
-      pending.current ??= job
-      setSaveState('error')
+    let failed = false
+    for (const [paneId, job] of jobs) {
+      try {
+        const summary = await hermit.writeSheet(job.projectId, job.sheetId, job.doc.toString())
+        const replace = (prev: SheetSummary[]) => prev.map((s) => (s.id === summary.id ? summary : s))
+        setSheetCache((c) => (c[job.projectId] ? { ...c, [job.projectId]: replace(c[job.projectId]) } : c))
+        if (job.projectId !== projectIdRef.current) continue
+        if (summary.archived) setArchived(replace)
+        else setSheets(replace)
+      } catch (err) {
+        console.error('Save failed', err)
+        if (!pending.current.has(paneId)) pending.current.set(paneId, job)
+        failed = true
+      }
     }
+    setSaveState(failed ? 'error' : pending.current.size ? 'unsaved' : 'saved')
   }, [])
 
   /** Forget unsaved edits for sheets that are about to disappear (deleted or moved). */
-  const discardPending = (match: (p: { projectId: string; sheetId: string }) => boolean) => {
-    if (pending.current && match(pending.current)) {
-      window.clearTimeout(saveTimer.current)
-      pending.current = null
-      setSaveState('saved')
-    }
+  const discardPending = (match: (p: SaveJob) => boolean) => {
+    const jobs = pending.current
+    const before = jobs.size
+    for (const [paneId, job] of jobs) if (match(job)) jobs.delete(paneId)
+    if (jobs.size === before) return
+    if (!jobs.size) window.clearTimeout(saveTimer.current)
+    setSaveState(jobs.size ? 'unsaved' : 'saved')
   }
 
-  const handleChange = (doc: Text | string) => {
-    if (!current) return
-    const sheetId = current.sheet.id
-    pending.current = { projectId: current.projectId, sheetId, doc }
-    liveDoc.current = doc
+  const handleChange = (paneId: number, open: OpenSheet, doc: Text | string) => {
+    const sheetId = open.sheet.id
+    pending.current.set(paneId, { projectId: open.projectId, sheetId, doc })
+    liveDocs.current.set(paneId, doc)
     setSaveState('unsaved')
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(flush, 600)
-    window.clearTimeout(statsTimer.current)
-    statsTimer.current = window.setTimeout(() => setStats(statsOf(sheetId, doc.toString())), 150)
+    const timers = statsTimers.current
+    window.clearTimeout(timers.get(paneId))
+    timers.set(
+      paneId,
+      window.setTimeout(() => updatePane(paneId, { stats: statsOf(sheetId, doc.toString()) }), 150)
+    )
   }
 
   // ── Loading ───────────────────────────────────────────────────────────────
@@ -268,38 +379,80 @@ export default function App() {
     }
   }, [])
 
+  /** A project's sheets, for a pane showing it; the sheet list too, if it's the project there. */
   const refreshSheets = useCallback(async (pid: string) => {
     const result = await hermit.listOutline(pid)
+    setSheetCache((c) => ({ ...c, [pid]: result.sheets }))
+    if (pid !== projectIdRef.current) return result
     setSheets(result.sheets)
     setOutline(result.items)
     setArchived(result.archived)
     return result
   }, [])
 
+  /** Show a project in the sheet list, without opening anything. */
+  const showProject = useCallback(
+    (pid: string | null) => {
+      if (pid === projectIdRef.current) return
+      projectIdRef.current = pid
+      setProjectId(pid)
+      setQuery('')
+      if (pid) void refreshSheets(pid)
+    },
+    [refreshSheets]
+  )
+
+  /** Work in another pane: the sheet list moves to where its sheet lives. */
+  const activatePane = useCallback(
+    (id: number) => {
+      if (id === activeRef.current) return
+      setActive(id)
+      const open = panesRef.current.find((p) => p.id === id)?.open
+      if (!open) return
+      showProject(open.projectId)
+      setArchiveOpen(open.sheet.archived)
+      if (!open.sheet.archived) setSection(open.sheet.section)
+    },
+    [showProject]
+  )
+
+  /** Open a sheet in a pane, the active one unless told otherwise. A sheet open in another pane is gone to there. */
   const openSheet = useCallback(
-    async (pid: string, sheetId: string | null) => {
+    async (pid: string, sheetId: string | null, paneId = activeRef.current) => {
       await flush()
       const seq = ++loadSeq.current
+      paneLoads.current.set(paneId, seq)
       if (!sheetId) {
-        setCurrent(null)
+        updatePane(paneId, { open: null })
+        return
+      }
+      const elsewhere = panesRef.current.find(
+        (p) => p.id !== paneId && p.open?.projectId === pid && p.open.sheet.id === sheetId
+      )
+      if (elsewhere) {
+        activatePane(elsewhere.id)
         return
       }
       const sheet = await hermit.readSheet(pid, sheetId)
-      if (seq !== loadSeq.current) return
-      liveDoc.current = sheet.content
-      setStats(statsOf(sheet.id, sheet.content))
-      setCurrent({ projectId: pid, sheet, key: `${pid}/${sheetId}#${seq}` })
+      if (paneLoads.current.get(paneId) !== seq) return
+      liveDocs.current.set(paneId, sheet.content)
+      updatePane(paneId, {
+        open: { projectId: pid, sheet, key: `${pid}/${sheetId}#${seq}` },
+        stats: statsOf(sheet.id, sheet.content)
+      })
+      lastInSection.current.set(viewKey(pid, sheet), sheetId)
+      if (paneId !== activeRef.current) return
+      showProject(pid)
       setArchiveOpen(sheet.archived)
       if (!sheet.archived) setSection(sheet.section)
-      lastInSection.current.set(viewKey(pid, sheet), sheetId)
-      remember(pid, sheetId)
     },
-    [flush]
+    [flush, activatePane, showProject]
   )
 
   const openProject = useCallback(
     async (pid: string | null, preferredSheet?: string | null) => {
       await flush()
+      projectIdRef.current = pid
       setProjectId(pid)
       setQuery('')
       setArchiveOpen(false)
@@ -318,13 +471,35 @@ export default function App() {
     [flush, openSheet, refreshSheets]
   )
 
-  /** Open the project and sheet last open in the collection, from its list of projects. */
+  /** Open the panes last open in the collection, from its list of projects. */
   const resume = useCallback(
     async (list: ProjectSummary[]) => {
       const last = lastIn(collectionRef.current)
-      await openProject(list.find((p) => p.id === last.projectId)?.id ?? firstActive(list), last.sheetId)
+      const exists = (pid?: string) => list.some((p) => p.id === pid)
+      const layout = (last.panes ?? []).filter((p) => exists(p.projectId))
+      const index = Math.max(0, Math.min(last.active ?? 0, layout.length - 1))
+      const fresh = layout.length > 1 ? layout.map((p) => newPane(p.preview)) : [newPane(layout[0]?.preview)]
+      pending.current.clear()
+      setPaneList(fresh)
+      setActive(fresh[Math.min(index, fresh.length - 1)].id)
+      await openProject(exists(last.projectId) ? last.projectId! : firstActive(list), last.sheetId)
+      if (fresh.length < 2) return
+      for (const [i, saved] of layout.entries()) {
+        if (i === index) continue
+        try {
+          await openSheet(saved.projectId, saved.sheetId, fresh[i].id)
+          if (saved.projectId !== projectIdRef.current) await refreshSheets(saved.projectId)
+        } catch (err) {
+          console.error('Reopening a pane failed', err)
+        }
+      }
+      // A pane that couldn't be filled again goes.
+      const filled = panesRef.current.filter((p) => p.open)
+      if (!filled.length || filled.length === panesRef.current.length) return
+      setPaneList(filled)
+      if (!filled.some((p) => p.id === activeRef.current)) activatePane(filled[0].id)
     },
-    [openProject]
+    [openProject, openSheet, refreshSheets, activatePane]
   )
 
   const init = useCallback(async () => {
@@ -338,38 +513,48 @@ export default function App() {
 
   // ── Sync ──────────────────────────────────────────────────────────────────
 
-  /** A pull changed files on disk: refresh the lists and the open sheet. */
+  /** A pull changed files on disk: refresh the lists and the open sheets. */
   const handleSyncChanged = async (paths: string[]) => {
     const was = collectionRef.current
     const list = await refreshProjects()
     // The open collection went, so another opened in its place.
     if (collectionRef.current !== was) {
-      pending.current = null
       await resume(list)
       return
     }
-    if (!projectId || !list.some((p) => p.id === projectId)) {
+    const exists = (pid: string) => list.some((p) => p.id === pid)
+    dropPanes((pid) => !exists(pid))
+    if (!projectIdRef.current || !exists(projectIdRef.current)) {
       await openProject(firstActive(list))
       return
     }
-    const { sheets: sheetList, archived: archivedList } = await refreshSheets(projectId)
-    if (!current || current.projectId !== projectId) return
-    const id = current.sheet.id
-    if (!paths.includes(sheetPath(collectionRef.current, projectId, id))) return
-
-    // Anything typed in the moment since sync saved this sheet would overwrite what was just pulled.
-    discardPending((p) => p.projectId === projectId && p.sheetId === id)
-    if (![...sheetList, ...archivedList].some((s) => s.id === id)) {
-      const fallback = archiveOpen ? archivedList[0] : sheetList.find((s) => s.section === section)
-      await openSheet(projectId, fallback?.id ?? null)
-      return
+    const outlines = new Map<string, Awaited<ReturnType<typeof refreshSheets>>>()
+    for (const pid of new Set([projectIdRef.current, ...panesRef.current.flatMap((p) => p.open?.projectId ?? [])])) {
+      outlines.set(pid, await refreshSheets(pid))
     }
-    const sheet = await hermit.readSheet(projectId, id)
-    liveDoc.current = sheet.content
-    setStats(statsOf(id, sheet.content))
-    // A canvas starts over from the new file; the editor keeps its place in the text.
-    if (isCanvasId(id)) setCurrent({ projectId, sheet, key: `${projectId}/${id}#${++loadSeq.current}` })
-    else editor.current?.replaceContent(sheet.content)
+    for (const pane of [...panesRef.current]) {
+      const open = pane.open
+      if (!open || !paths.includes(sheetPath(collectionRef.current, open.projectId, open.sheet.id))) continue
+      const { projectId: pid, sheet: stale } = open
+      const { sheets: sheetList, archived: archivedList } = outlines.get(pid)!
+      // Anything typed in the moment since sync saved this sheet would overwrite what was just pulled.
+      discardPending((p) => p.projectId === pid && p.sheetId === stale.id)
+      if (![...sheetList, ...archivedList].some((s) => s.id === stale.id)) {
+        const taken = openElsewhere(pane.id, pid)
+        const fallback = (stale.archived ? archivedList : sheetList.filter((s) => s.section === stale.section)).find(
+          (s) => !taken.has(s.id)
+        )
+        await openSheet(pid, fallback?.id ?? null, pane.id)
+        continue
+      }
+      const sheet = await hermit.readSheet(pid, stale.id)
+      liveDocs.current.set(pane.id, sheet.content)
+      updatePane(pane.id, { stats: statsOf(stale.id, sheet.content) })
+      // A canvas starts over from the new file; the editor keeps its place in the text.
+      if (isCanvasId(stale.id)) {
+        updatePane(pane.id, { open: { projectId: pid, sheet, key: `${pid}/${stale.id}#${++loadSeq.current}` } })
+      } else editors.current.get(pane.id)?.replaceContent(sheet.content)
+    }
   }
 
   const syncChangedHandler = useRef(handleSyncChanged)
@@ -390,8 +575,11 @@ export default function App() {
     }
   }, [sync?.status])
 
-  const conflicted = Boolean(current && sync?.conflicts.includes(sheetPath(collection, current.projectId, current.sheet.id)))
+  const isConflicted = (open: OpenSheet | null) =>
+    Boolean(open && sync?.conflicts.includes(sheetPath(collection, open.projectId, open.sheet.id)))
+  const conflicted = isConflicted(current)
   const onCanvas = Boolean(current && isCanvasId(current.sheet.id))
+  const preview = activePane.preview && Boolean(current) && !onCanvas
 
   // ── Search ────────────────────────────────────────────────────────────────
 
@@ -458,10 +646,78 @@ export default function App() {
   const projectsMoved = (from: string, to: string) => {
     if (from === to) return
     const remap = (id: string) => (id === from || id.startsWith(`${from}/`) ? to + id.slice(from.length) : id)
-    if (pending.current) pending.current = { ...pending.current, projectId: remap(pending.current.projectId) }
-    if (projectId) setProjectId(remap(projectId))
-    setCurrent((c) => (c ? { ...c, projectId: remap(c.projectId) } : c))
-    if (current) remember(remap(current.projectId), current.sheet.id)
+    for (const job of pending.current.values()) job.projectId = remap(job.projectId)
+    if (projectIdRef.current) {
+      projectIdRef.current = remap(projectIdRef.current)
+      setProjectId(projectIdRef.current)
+    }
+    setPaneList(panesRef.current.map((p) => (p.open ? { ...p, open: { ...p.open, projectId: remap(p.open.projectId) } } : p)))
+  }
+
+  /** Sheets open in panes other than this one, in a project. */
+  const openElsewhere = (paneId: number, pid: string) =>
+    new Set(panesRef.current.flatMap((p) => (p.id !== paneId && p.open?.projectId === pid ? [p.open.sheet.id] : [])))
+
+  /** Close a pane, and work on in the one left. Anything typed in it still saves. */
+  const closePane = (id: number) => {
+    const rest = panesRef.current.filter((p) => p.id !== id)
+    if (!rest.length) return
+    liveDocs.current.delete(id)
+    setPaneList(rest)
+    if (activeRef.current === id) activatePane(rest[0].id)
+  }
+
+  /** Projects that are gone take their panes with them: closed if another's open, emptied if not. */
+  const dropPanes = (gone: (pid: string) => boolean) => {
+    for (const pane of [...panesRef.current]) {
+      if (!pane.open || !gone(pane.open.projectId)) continue
+      if (panesRef.current.length > 1) closePane(pane.id)
+      else updatePane(pane.id, { open: null })
+    }
+  }
+
+  /**
+   * Split the editor, or turn the split the other way. The new pane opens beside the one being worked in with the
+   * other side of the project: the notes beside the content, or the content beside the notes.
+   */
+  const splitEditor = async (direction: SplitDirection) => {
+    setPrefs((p) => ({ ...p, split: direction }))
+    if (compact || panesRef.current.length > 1) return
+    await flush()
+    const from = current?.sheet
+    const pane = newPane()
+    setPaneList([...panesRef.current, pane])
+    setActive(pane.id)
+    if (!projectId) return
+    const to = from && !from.archived ? otherSection(from.section) : section
+    const inSection = sheets.filter((s) => s.section === to && s.id !== from?.id)
+    const last = lastInSection.current.get(`${projectId}:${to}`)
+    const target = inSection.find((s) => s.id === last) ?? inSection[0]
+    setArchiveOpen(false)
+    setSection(to)
+    if (target) await openSheet(projectId, target.id, pane.id)
+  }
+
+  /** Open a sheet in the other pane, splitting the editor first if it isn't. */
+  const openBeside = async (pid: string, sheetId: string) => {
+    if (compact) return
+    await flush()
+    let other = panesRef.current.find((p) => p.id !== activeRef.current)
+    if (!other) {
+      other = newPane()
+      setPaneList([...panesRef.current, other])
+    }
+    setActive(other.id)
+    await openSheet(pid, sheetId, other.id)
+  }
+
+  /** Move to the next pane along, and put the caret there. */
+  const focusOtherPane = () => {
+    const list = panesRef.current
+    if (list.length < 2) return
+    const next = list[(list.findIndex((p) => p.id === activeRef.current) + 1) % list.length]
+    activatePane(next.id)
+    if (!next.preview) editors.current.get(next.id)?.focus()
   }
 
   const createFolder = async (parent: string | null = null) => {
@@ -489,7 +745,8 @@ export default function App() {
     const inside = (id: string) => id.startsWith(`${folder}/`)
     discardPending((p) => inside(p.projectId))
     const list = await refreshProjects()
-    if (projectId && inside(projectId)) await openProject(firstActive(list))
+    dropPanes(inside)
+    if (projectIdRef.current && inside(projectIdRef.current)) await openProject(firstActive(list))
   }
 
   /** Move a project or folder into a folder, or to the top of the library with null. */
@@ -508,7 +765,8 @@ export default function App() {
     if (!(await hermit.deleteProject(id))) return
     discardPending((p) => p.projectId === id)
     const list = await refreshProjects()
-    if (projectId === id) await openProject(firstActive(list))
+    dropPanes((pid) => pid === id)
+    if (projectIdRef.current === id) await openProject(firstActive(list))
   }
 
   /** Archiving the open project moves on to another, as moving it to the Trash does. */
@@ -522,7 +780,8 @@ export default function App() {
     }
     discardPending((p) => p.projectId === id)
     const list = await refreshProjects()
-    if (projectId === id) await openProject(firstActive(list))
+    dropPanes((pid) => pid === id)
+    if (projectIdRef.current === id) await openProject(firstActive(list))
   }
 
   const restoreProject = async (id: string) => {
@@ -541,8 +800,7 @@ export default function App() {
   const switchCollection = async (name: string) => {
     if (name === collectionRef.current) return
     await flush()
-    // Anything typed since belongs to the collection being left.
-    pending.current = null
+    // Anything typed since belongs to the collection being left; resuming the next one forgets it.
     setRenamingProject(null)
     setRenamingFolder(null)
     try {
@@ -578,7 +836,7 @@ export default function App() {
       console.error('Rename failed', err)
     }
     await refreshProjects()
-    if (current) remember(current.projectId, current.sheet.id)
+    remember()
   }
 
   const deleteCollection = async (name: string) => {
@@ -589,7 +847,6 @@ export default function App() {
       await refreshProjects()
       return
     }
-    pending.current = null
     await resume(await refreshProjects())
   }
 
@@ -605,7 +862,8 @@ export default function App() {
     const inside = (id: string) => id === libraryPath || id.startsWith(`${libraryPath}/`)
     discardPending((p) => inside(p.projectId))
     const list = await refreshProjects()
-    if (projectId && inside(projectId)) await openProject(firstActive(list))
+    dropPanes(inside)
+    if (projectIdRef.current && inside(projectIdRef.current)) await openProject(firstActive(list))
   }
 
   /** The switcher at the foot of the library: every collection, and what can be done with the open one. */
@@ -647,6 +905,7 @@ export default function App() {
       const project = await hermit.createProject('Untitled Project')
       await refreshProjects()
       pid = project.id
+      projectIdRef.current = pid
       setProjectId(pid)
     }
     await flush()
@@ -702,30 +961,33 @@ export default function App() {
     await openSheet(projectId, copy.id)
   }
 
-  /** After sheets leave the list, if the open one went, select its neighbour in the same section or archive. */
+  /** After sheets leave the list, each pane whose sheet went selects its neighbour in the same section or archive. */
   const selectNeighbour = async (pid: string, removedIds: string[], before: SheetSummary[]) => {
     const { sheets: list, archived: archivedList } = await refreshSheets(pid)
     await refreshProjects()
-    if (!current || !removedIds.includes(current.sheet.id)) return
-    const from = current.sheet
-    const sameList = (s: SheetSummary) => s.archived === from.archived && (from.archived || s.section === from.section)
-    const index = before.filter(sameList).findIndex((s) => s.id === from.id)
-    const remaining = [...list, ...archivedList].filter(sameList)
-    const next = remaining[Math.min(index, remaining.length - 1)]
-    await openSheet(pid, next?.id ?? null)
+    for (const pane of [...panesRef.current]) {
+      const from = pane.open?.projectId === pid ? pane.open.sheet : null
+      if (!from || !removedIds.includes(from.id)) continue
+      const taken = openElsewhere(pane.id, pid)
+      const sameList = (s: SheetSummary) => s.archived === from.archived && (from.archived || s.section === from.section)
+      const index = before.filter(sameList).findIndex((s) => s.id === from.id)
+      const remaining = [...list, ...archivedList].filter((s) => sameList(s) && !taken.has(s.id))
+      const next = remaining[Math.min(index, remaining.length - 1)]
+      await openSheet(pid, next?.id ?? null, pane.id)
+    }
   }
 
   const deleteSheet = async (id: string) => {
     if (!projectId) return
     await flush()
     if (!(await hermit.deleteSheet(projectId, id))) return
-    discardPending((p) => p.sheetId === id)
+    discardPending((p) => p.projectId === projectId && p.sheetId === id)
     await selectNeighbour(projectId, [id], everySheet)
   }
 
   const moveSheet = async (sheetId: string, from: string, to: string) => {
     await flush()
-    discardPending((p) => p.sheetId === sheetId)
+    discardPending((p) => p.projectId === from && p.sheetId === sheetId)
     await hermit.moveSheet(from, sheetId, to)
     if (from === projectId) await selectNeighbour(from, [sheetId], everySheet)
     else await refreshProjects()
@@ -761,30 +1023,35 @@ export default function App() {
     const { sheets: list } = await refreshSheets(pid)
     await refreshProjects()
     const restored = list.find((s) => s.id === renamed[id])
-    if (current?.projectId !== pid || current.sheet.id !== id || !restored) return
+    const following = current?.projectId === pid && current.sheet.id === id
     await retarget(pid, renamed, list)
+    if (!following || !restored) return
     setArchiveOpen(false)
     setSection(restored.section)
   }
 
-  /** The open sheet's file moved; keep editing it under its new id without reloading. */
+  /** Open sheets' files moved; keep editing them under their new ids without reloading. */
   const retarget = async (pid: string, renamed: Record<string, string>, list: SheetSummary[]) => {
-    if (current?.projectId !== pid || !Object.keys(renamed).length) return
-    const openId = renamed[current.sheet.id] ?? current.sheet.id
-    if (isCanvasId(openId)) {
-      // Moving sheets rewrites the links on canvases that show them, so the open canvas reloads.
-      const sheet = await hermit.readSheet(pid, openId)
-      setCurrent({ projectId: pid, sheet, key: `${pid}/${openId}#${++loadSeq.current}` })
-      lastInSection.current.set(viewKey(pid, sheet), openId)
-      remember(pid, openId)
-      return
+    if (!Object.keys(renamed).length) return
+    for (const pane of [...panesRef.current]) {
+      const open = pane.open
+      if (open?.projectId !== pid) continue
+      const openId = renamed[open.sheet.id] ?? open.sheet.id
+      if (isCanvasId(openId)) {
+        // Moving sheets rewrites the links on canvases that show them, so open canvases reload.
+        const sheet = await hermit.readSheet(pid, openId)
+        updatePane(pane.id, { open: { projectId: pid, sheet, key: `${pid}/${openId}#${++loadSeq.current}` } })
+        lastInSection.current.set(viewKey(pid, sheet), openId)
+        continue
+      }
+      const moved = list.find((s) => s.id === renamed[open.sheet.id])
+      if (!moved) continue
+      const { id, section: movedTo, subsection, archived: isArchived } = moved
+      updatePane(pane.id, {
+        open: { ...open, sheet: { ...open.sheet, id, section: movedTo, subsection, archived: isArchived } }
+      })
+      lastInSection.current.set(viewKey(pid, moved), id)
     }
-    const moved = list.find((s) => s.id === renamed[current.sheet.id])
-    if (!moved) return
-    const { id, section: movedTo, subsection, archived: isArchived } = moved
-    setCurrent({ ...current, sheet: { ...current.sheet, id, section: movedTo, subsection, archived: isArchived } })
-    lastInSection.current.set(viewKey(pid, moved), id)
-    remember(pid, id)
   }
 
   /** Reorder or refile a sheet or subsection. */
@@ -804,7 +1071,7 @@ export default function App() {
     const toSection = 'into' in target ? target.into.section : ('before' in target ? target.before : target.after).section
     if (item.kind === 'sheet' && toSection !== item.section) {
       await selectNeighbour(pid, [item.id], everySheet)
-      if (current?.sheet.id !== item.id) await retarget(pid, renamed, [])
+      await retarget(pid, renamed, [])
       return
     }
     await retarget(pid, renamed, (await refreshSheets(pid)).sheets)
@@ -830,34 +1097,32 @@ export default function App() {
   const deleteSubsection = async (place: SheetPlace) => {
     if (!projectId || !place.subsection) return
     await flush()
-    if (!(await hermit.deleteSubsection(projectId, place))) return
-    const wasOpen =
-      current?.projectId === projectId &&
-      current.sheet.section === place.section &&
-      isWithin(current.sheet.subsection, place.subsection)
-    if (wasOpen) discardPending((p) => p.projectId === projectId && p.sheetId === current.sheet.id)
-    const { sheets: list } = await refreshSheets(projectId)
-    if (wasOpen) await openSheet(projectId, list.find((s) => s.section === place.section)?.id ?? null)
+    const pid = projectId
+    if (!(await hermit.deleteSubsection(pid, place))) return
+    const inside = (open: OpenSheet | null) =>
+      open?.projectId === pid &&
+      !open.sheet.archived &&
+      open.sheet.section === place.section &&
+      isWithin(open.sheet.subsection, place.subsection!)
+    const gone = panesRef.current.filter((p) => inside(p.open))
+    discardPending((p) => gone.some((pane) => pane.open!.sheet.id === p.sheetId && p.projectId === pid))
+    const { sheets: list } = await refreshSheets(pid)
+    for (const pane of gone) {
+      const taken = openElsewhere(pane.id, pid)
+      await openSheet(pid, list.find((s) => s.section === place.section && !taken.has(s.id))?.id ?? null, pane.id)
+    }
   }
 
-  /** Show a section, picking up where you left off in it. */
-  const switchSection = async (to: Section) => {
-    if (!projectId || (to === section && !archiveOpen)) return
+  /** List a section's sheets. The open sheet stays open until another is chosen. */
+  const switchSection = (to: Section) => {
+    if (!projectId) return
     setArchiveOpen(false)
     setSection(to)
-    const inSection = sheets.filter((s) => s.section === to)
-    const last = lastInSection.current.get(`${projectId}:${to}`)
-    const target = inSection.find((s) => s.id === last) ?? inSection[0]
-    await openSheet(projectId, target?.id ?? null)
   }
 
-  /** Show the archive, picking up where you left off in it. */
-  const openArchive = async () => {
-    if (!projectId || archiveOpen) return
-    setArchiveOpen(true)
-    const last = lastInSection.current.get(`${projectId}:archive`)
-    const target = archived.find((s) => s.id === last) ?? archived[0]
-    await openSheet(projectId, target?.id ?? null)
+  /** List the archive. The open sheet stays open until another is chosen. */
+  const openArchive = () => {
+    if (projectId) setArchiveOpen(true)
   }
 
   const exportSheets = async (pid: string, ids: string[] | null, format?: ExportFormat) => {
@@ -951,10 +1216,17 @@ export default function App() {
     else if (choice?.startsWith('export-')) void exportSheets(id, null, choice.slice(7) as ExportFormat)
   }
 
+  /** Opening a sheet in the other pane, for one that isn't open in either. */
+  const besideItems = (id: string): ContextMenuEntry[] =>
+    compact || panes.some((p) => p.open?.projectId === projectId && p.open.sheet.id === id)
+      ? []
+      : [{ id: 'beside', label: split ? 'Open in Other Pane' : 'Open in Split View' }]
+
   const showArchivedMenu = async (sheet: SheetSummary) => {
     if (!projectId) return
     const canvas = isCanvasId(sheet.id)
     const choice = await hermit.showContextMenu([
+      ...besideItems(sheet.id),
       { id: 'restore', label: `Restore to ${placeName(sheet)}` },
       ...(canvas
         ? []
@@ -962,7 +1234,8 @@ export default function App() {
       { type: 'separator' },
       { id: 'delete', label: TRASH_LABEL }
     ])
-    if (choice === 'restore') void restoreSheet(sheet.id)
+    if (choice === 'beside') void openBeside(projectId, sheet.id)
+    else if (choice === 'restore') void restoreSheet(sheet.id)
     else if (choice === 'delete') void deleteSheet(sheet.id)
     else if (choice?.startsWith('export-')) void exportSheets(projectId, [sheet.id], choice.slice(7) as ExportFormat)
   }
@@ -984,6 +1257,7 @@ export default function App() {
     const item: OutlineItem | null = sheet ? { kind: 'sheet', id, section: sheet.section, subsection: sheet.subsection } : null
     const [up, down] = item ? [neighbourOf(item, -1), neighbourOf(item, 1)] : [null, null]
     const choice = await hermit.showContextMenu([
+      ...besideItems(id),
       ...(canvas ? [{ id: 'rename', label: 'Rename' }] : []),
       { id: 'duplicate', label: 'Duplicate' },
       ...(touch && up ? [{ id: 'up', label: 'Move Up' }] : []),
@@ -1002,7 +1276,8 @@ export default function App() {
       { id: 'archive', label: 'Archive' },
       { id: 'delete', label: TRASH_LABEL }
     ])
-    if (choice === 'rename') setRenamingSheet(id)
+    if (choice === 'beside') void openBeside(projectId, id)
+    else if (choice === 'rename') setRenamingSheet(id)
     else if (choice === 'up' && item && up) void moveItem(item, { before: up })
     else if (choice === 'down' && item && down) void moveItem(item, { after: down })
     else if (choice === 'duplicate') void duplicateSheet(id)
@@ -1065,7 +1340,7 @@ export default function App() {
     if (choice === 'new') void createSheet('', place)
     else if (choice === 'new-canvas') void createCanvas(place)
     else if (choice === 'new-subsection') {
-      await switchSection(to)
+      switchSection(to)
       void createSubsection(place)
     }
   }
@@ -1113,8 +1388,17 @@ export default function App() {
     else if (choice === 'delete') void deleteSubsection(place)
   }
 
-  const togglePref = (key: 'showLibrary' | 'showSheets' | 'preview' | 'typewriter' | 'grammar') =>
+  const togglePref = (key: 'showLibrary' | 'showSheets' | 'typewriter' | 'grammar') =>
     setPrefs((p) => ({ ...p, [key]: !p[key] }))
+
+  const togglePreview = () => {
+    if (current && !onCanvas) updatePane(activeRef.current, (p) => ({ preview: !p.preview }))
+  }
+
+  /** Put the caret back in the pane being worked in, unless it's previewing. */
+  const focusEditor = () => {
+    if (!preview) editors.current.get(activeRef.current)?.focus()
+  }
 
   // Hide both side panes if either is showing; otherwise bring both back.
   const toggleSidebars = () =>
@@ -1146,7 +1430,7 @@ export default function App() {
 
   const closeSettings = () => {
     setSettingsOpen(false)
-    if (!prefs.preview) editor.current?.focus()
+    focusEditor()
   }
 
   const openMerge = () => {
@@ -1156,12 +1440,32 @@ export default function App() {
 
   const closeProjectSettings = () => {
     setProjectSettingsFor(null)
-    if (!prefs.preview) editor.current?.focus()
+    focusEditor()
   }
 
   const closeMerge = () => {
     setMergeOpen(false)
-    if (!prefs.preview) editor.current?.focus()
+    focusEditor()
+  }
+
+  /** The toolbar's split button: which way to split, or once split, which way it runs and closing a pane. */
+  const showSplitMenu = async (at: { x: number; y: number }) => {
+    const check = (on: boolean, label: string) => `${on ? '✓ ' : ''}${label}`
+    const choice = await hermit.showContextMenu(
+      split
+        ? [
+            { id: 'split-right', label: check(prefs.split === 'row', 'Side by Side') },
+            { id: 'split-down', label: check(prefs.split === 'column', 'Top and Bottom') },
+            { type: 'separator' },
+            { id: 'close-pane', label: 'Close Pane' }
+          ]
+        : [
+            { id: 'split-right', label: 'Split Side by Side' },
+            { id: 'split-down', label: 'Split Top and Bottom' }
+          ],
+      at
+    )
+    if (choice) handleMenu(choice as MenuAction)
   }
 
   const syncStatusClick = () => {
@@ -1183,6 +1487,7 @@ export default function App() {
 
   /** A phone's status bar has room for a word count; the rest of it is a tap away. */
   const showStatusSheet = async () => {
+    const { stats } = activePane
     const counts =
       stats.canvas ??
       [formatCount(stats.words, 'word'), formatCount(stats.chars, 'character'), `${readingMinutes(stats.words)} min read`].join(
@@ -1208,13 +1513,14 @@ export default function App() {
 
   const handleMenu = (action: MenuAction) => {
     // The editor sits under the settings overlay; don't edit it blind.
-    const editable = !prefs.preview && !settingsOpen && !projectSettingsFor && !mergeOpen && !conflicted && !onCanvas
+    const editable = !preview && !settingsOpen && !projectSettingsFor && !mergeOpen && !conflicted && !onCanvas
+    const editor = editors.current.get(activeRef.current)
     const run = (cmd: FormatCommand) => {
       const command = formatCommands[sheetFormat][cmd]
-      if (editable && command) editor.current?.run(command)
+      if (editable && command) editor?.run(command)
     }
     const setElementTo = (type: ScreenplayElement) => {
-      if (editable && sheetFormat === 'fountain') editor.current?.run(setScreenplayElement(type))
+      if (editable && sheetFormat === 'fountain') editor?.run(setScreenplayElement(type))
     }
     switch (action) {
       case 'new-sheet': return void createSheet()
@@ -1226,18 +1532,22 @@ export default function App() {
       case 'toggle-library': return compact ? setScreen('library') : togglePref('showLibrary')
       case 'toggle-sheets': return compact ? setScreen('sheets') : togglePref('showSheets')
       case 'toggle-sidebars': return toggleSidebars()
-      case 'toggle-section': return void switchSection(archiveOpen ? section : otherSection(section))
-      case 'toggle-preview': return current && !onCanvas && togglePref('preview')
+      case 'toggle-section': return switchSection(archiveOpen ? section : otherSection(section))
+      case 'toggle-preview': return togglePreview()
       case 'toggle-focus': return toggleFocus()
       case 'toggle-typewriter': return togglePref('typewriter')
       case 'toggle-grammar': return togglePref('grammar')
+      case 'split-right': return void splitEditor('row')
+      case 'split-down': return void splitEditor('column')
+      case 'focus-other-pane': return focusOtherPane()
+      case 'close-pane': return split && closePane(activeRef.current)
       case 'font-sans': return setPrefs((p) => ({ ...p, font: 'sans' }))
       case 'font-serif': return setPrefs((p) => ({ ...p, font: 'serif' }))
       case 'font-mono': return setPrefs((p) => ({ ...p, font: 'mono' }))
       case 'font-bigger': return setPrefs((p) => ({ ...p, fontSize: Math.min(30, p.fontSize + 1) }))
       case 'font-smaller': return setPrefs((p) => ({ ...p, fontSize: Math.max(12, p.fontSize - 1) }))
       case 'font-reset': return setPrefs((p) => ({ ...p, fontSize: DEFAULT_PREFS.fontSize }))
-      case 'find': return editable && editor.current?.openSearch()
+      case 'find': return editable && editor?.openSearch()
       case 'next-sheet': return stepSheet(1)
       case 'prev-sheet': return stepSheet(-1)
       case 'format-bold': return run('bold')
@@ -1258,7 +1568,6 @@ export default function App() {
         if (sync?.remoteUrl && sync.settings.enabled) return void hermit.syncNow()
         return openSettings('sync')
       case 'library-changed':
-        pending.current = null
         return void init()
     }
   }
@@ -1268,7 +1577,7 @@ export default function App() {
     const check = (on: boolean, label: string) => `${on ? '✓ ' : ''}${label}`
     const choice = await hermit.showContextMenu(
       [
-        ...(current && !onCanvas && !prefs.preview ? [{ id: 'find', label: 'Find…' }] : []),
+        ...(current && !onCanvas && !preview ? [{ id: 'find', label: 'Find…' }] : []),
         ...(compact
           ? [
               { id: 'toggle-focus', label: check(prefs.focus, 'Focus Mode') },
@@ -1318,10 +1627,181 @@ export default function App() {
     (sum, s) => sum + s.wordCount,
     0
   )
-  const previewSource = prefs.preview && current ? liveDoc.current.toString() : ''
+  const { stats, element } = activePane
   // Formatting above the on-screen keyboard while writing.
-  const formatBar = touch && editorFocused && Boolean(current) && !onCanvas && !prefs.preview && !conflicted
+  const formatBar = touch && editorFocused && Boolean(current) && !onCanvas && !preview && !conflicted
   const shortcutModifier = hermit.platform === 'darwin' ? '⌘' : 'Ctrl+'
+  const activeEditor = () => editors.current.get(activePane.id)
+
+  /** A project's sheets: the list's, or for a pane showing another project, as last loaded. */
+  const sheetsOf = (pid: string) => (pid === projectId ? sheets : (sheetCache[pid] ?? []))
+
+  /** What a split pane's header calls its sheet: its title as last saved. */
+  const titleOf = (open: OpenSheet) => {
+    const listed = open.projectId === projectId ? [...sheets, ...archived] : (sheetCache[open.projectId] ?? [])
+    return (listed.find((s) => s.id === open.sheet.id)?.title ?? open.sheet.title) || 'Untitled'
+  }
+
+  /** Drag the line between the panes to share the editor out differently. */
+  const resizeSplit = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const handle = e.currentTarget
+    const box = handle.parentElement!.getBoundingClientRect()
+    handle.setPointerCapture(e.pointerId)
+    const move = (ev: PointerEvent) => {
+      const ratio =
+        prefs.split === 'row' ? (ev.clientX - box.left) / box.width : (ev.clientY - box.top) / box.height
+      setPrefs((p) => ({ ...p, splitRatio: Math.min(0.8, Math.max(0.2, ratio)) }))
+    }
+    const end = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', end)
+      handle.removeEventListener('pointercancel', end)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', end)
+    handle.addEventListener('pointercancel', end)
+  }
+
+  const emptyEditor = ready && (
+    <div className="editor-empty">
+      {libraryError && projects.length === 0 ? (
+        <>
+          <p className="editor-empty-error">{libraryError}</p>
+          <div className="field-row">
+            <button className="primary-button" onClick={() => void init()}>
+              Try Again
+            </button>
+            <button className="ghost-button" onClick={() => openSettings('library')}>
+              Change Location…
+            </button>
+          </div>
+        </>
+      ) : projects.length === 0 ? (
+        <>
+          <p>Your library is empty.</p>
+          <button className="primary-button" onClick={() => void createProject()}>
+            <PlusIcon /> New Project
+          </button>
+        </>
+      ) : archiveOpen ? (
+        <p>Nothing from the archive is open.</p>
+      ) : (
+        <>
+          <p>{section === 'notes' ? 'No note selected.' : 'No sheet selected.'}</p>
+          <button className="primary-button" onClick={() => void createSheet()}>
+            <PlusIcon /> New {SECTION_NAMES[section].item}
+          </button>
+        </>
+      )}
+    </div>
+  )
+
+  const renderPane = (pane: Pane, index: number) => {
+    const { open } = pane
+    const active = pane.id === activePane.id
+    const canvas = Boolean(open && isCanvasId(open.sheet.id))
+    const readOnly = isConflicted(open)
+    const previewing = pane.preview && Boolean(open) && !canvas
+    const format: ContentFormat = open?.sheet.section === 'content' ? formatOf(open.projectId) : 'markdown'
+    return (
+      <section
+        key={pane.id}
+        className={`editor-pane${active ? ' active' : ''}`}
+        style={split ? { flex: `${index === 0 ? prefs.splitRatio : 1 - prefs.splitRatio} 1 0` } : undefined}
+        // Clicking or tabbing into a pane makes it the one worked in.
+        onFocus={() => activatePane(pane.id)}
+        onPointerDown={() => activatePane(pane.id)}
+      >
+        {split && (
+          <div
+            className="editor-pane-header"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              activatePane(pane.id)
+              if (!previewing) editors.current.get(pane.id)?.focus()
+            }}
+          >
+            <span className="editor-pane-title">{open ? titleOf(open) : 'Nothing open'}</span>
+            {open && <span className="editor-pane-place">{open.sheet.archived ? 'Archive' : placeName(open.sheet)}</span>}
+            <button
+              className="icon-button"
+              onClick={(e) => {
+                e.stopPropagation()
+                closePane(pane.id)
+              }}
+              aria-label="Close pane"
+              title="Close Pane"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        )}
+
+        {open?.sheet.archived && (
+          <div className="archive-banner">
+            <span>Archived from {placeName(open.sheet)}.</span>
+            <button className="ghost-button" onClick={() => void restoreSheet(open.sheet.id)}>
+              Restore
+            </button>
+          </div>
+        )}
+
+        {readOnly && (
+          <div className="conflict-banner">
+            <span>This sheet changed here and on GitHub. It’s read-only until the conflict is resolved.</span>
+            <button className="ghost-button" onClick={openMerge}>
+              Resolve…
+            </button>
+          </div>
+        )}
+
+        <div className="editor-body">
+          {open && canvas ? (
+            <CanvasView
+              key={open.key}
+              projectId={open.projectId}
+              sheetId={open.sheet.id}
+              content={open.sheet.content}
+              sheets={sheetsOf(open.projectId)}
+              readOnly={readOnly}
+              onChange={(doc) => handleChange(pane.id, open, doc)}
+              // Split, a canvas's notes open beside it, so it stays in view.
+              onOpenSheet={(id) => void (split ? openBeside(open.projectId, id) : openSheet(open.projectId, id, pane.id))}
+            />
+          ) : open ? (
+            <>
+              <Editor
+                ref={(handle) => {
+                  if (handle) editors.current.set(pane.id, handle)
+                  else editors.current.delete(pane.id)
+                }}
+                docKey={open.key}
+                content={open.sheet.content}
+                format={format}
+                focus={prefs.focus}
+                typewriter={prefs.typewriter}
+                grammar={prefs.grammar ? prefs.dialect : null}
+                fontKey={`${prefs.font}:${prefs.fontSize}:${split ? prefs.split : ''}`}
+                hidden={previewing}
+                readOnly={readOnly}
+                // On touch, the keyboard comes up only once the writer taps into the text.
+                autoFocus={!touch && active}
+                onChange={(doc) => handleChange(pane.id, open, doc)}
+                onElementChange={(now) => updatePane(pane.id, { element: now })}
+              />
+              {previewing && <Preview text={(liveDocs.current.get(pane.id) ?? '').toString()} format={format} />}
+            </>
+          ) : active ? (
+            emptyEditor
+          ) : (
+            <div className="editor-empty">
+              <p>Nothing open here.</p>
+            </div>
+          )}
+        </div>
+      </section>
+    )
+  }
 
   const style = {
     '--editor-font': FONTS[prefs.font],
@@ -1382,8 +1862,8 @@ export default function App() {
           activeId={current?.sheet.id ?? null}
           query={query}
           onQueryChange={setQuery}
-          onSectionChange={(s) => void switchSection(s)}
-          onOpenArchive={() => void openArchive()}
+          onSectionChange={switchSection}
+          onOpenArchive={openArchive}
           onArchive={(item) => void archiveItem(item)}
           onSelect={(id) => {
             if (projectId && id !== current?.sheet.id) void openSheet(projectId, id)
@@ -1407,7 +1887,10 @@ export default function App() {
       )}
 
       {/* On a phone the editor stays put while hidden, so it keeps its place and its unsaved edits. */}
-      <main className={`pane editor${prefs.focus ? ' focus-mode' : ''}`} hidden={compact && screen !== 'editor'}>
+      <main
+        className={`pane editor${prefs.focus ? ' focus-mode' : ''}${split ? ' split' : ''}`}
+        hidden={compact && screen !== 'editor'}
+      >
         {/* Toolbar clicks shouldn't pull focus out of the editor. */}
         <header className="pane-header editor-toolbar" onMouseDown={(e) => e.preventDefault()}>
           {compact ? (
@@ -1437,7 +1920,8 @@ export default function App() {
             </div>
           )}
           <div className="toolbar-spacer" />
-          {(current?.sheet.section === 'notes' || current?.sheet.subsection) && (
+          {/* Split, each pane says where its own sheet lives. */}
+          {!split && (current?.sheet.section === 'notes' || current?.sheet.subsection) && (
             <span className="place-label">{placeName(current.sheet)}</span>
           )}
           <div className="toolbar-modes">
@@ -1461,13 +1945,27 @@ export default function App() {
               </>
             )}
             <button
-              className={`icon-button${prefs.preview ? ' on' : ''}`}
-              onClick={() => togglePref('preview')}
+              className={`icon-button${preview ? ' on' : ''}`}
+              onClick={togglePreview}
               disabled={!current || onCanvas}
               title="Preview (⇧⌘P)"
             >
               <EyeIcon />
             </button>
+            {!compact && (
+              <button
+                className={`icon-button${split ? ' on' : ''}`}
+                aria-label="Split editor"
+                aria-haspopup="menu"
+                title="Split Editor"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  void showSplitMenu({ x: rect.left, y: rect.bottom + 4 })
+                }}
+              >
+                {prefs.split === 'row' ? <SplitRightIcon /> : <SplitDownIcon />}
+              </button>
+            )}
             {touch && (
               <button
                 className="icon-button"
@@ -1484,111 +1982,42 @@ export default function App() {
           </div>
         </header>
 
-        {current?.sheet.archived && (
-          <div className="archive-banner">
-            <span>Archived from {placeName(current.sheet)}.</span>
-            <button className="ghost-button" onClick={() => void restoreSheet(current.sheet.id)}>
-              Restore
-            </button>
-          </div>
-        )}
-
-        {conflicted && (
-          <div className="conflict-banner">
-            <span>This sheet changed here and on GitHub. It’s read-only until the conflict is resolved.</span>
-            <button className="ghost-button" onClick={openMerge}>
-              Resolve…
-            </button>
-          </div>
-        )}
-
-        <div className="editor-body">
-          {current && onCanvas ? (
-            <CanvasView
-              key={current.key}
-              projectId={current.projectId}
-              sheetId={current.sheet.id}
-              content={current.sheet.content}
-              sheets={sheets}
-              readOnly={conflicted}
-              onChange={handleChange}
-              onOpenSheet={(id) => void openSheet(current.projectId, id)}
-            />
-          ) : current ? (
-            <>
-              <Editor
-                ref={editor}
-                docKey={current.key}
-                content={current.sheet.content}
-                format={sheetFormat}
-                focus={prefs.focus}
-                typewriter={prefs.typewriter}
-                grammar={prefs.grammar ? prefs.dialect : null}
-                fontKey={`${prefs.font}:${prefs.fontSize}`}
-                hidden={prefs.preview}
-                readOnly={conflicted}
-                // On touch, the keyboard comes up only once the writer taps into the text.
-                autoFocus={!touch}
-                onChange={handleChange}
-                onElementChange={setElement}
-              />
-              {prefs.preview && <Preview text={previewSource} format={sheetFormat} />}
-            </>
-          ) : (
-            ready && (
-              <div className="editor-empty">
-                {libraryError && projects.length === 0 ? (
-                  <>
-                    <p className="editor-empty-error">{libraryError}</p>
-                    <div className="field-row">
-                      <button className="primary-button" onClick={() => void init()}>
-                        Try Again
-                      </button>
-                      <button className="ghost-button" onClick={() => openSettings('library')}>
-                        Change Location…
-                      </button>
-                    </div>
-                  </>
-                ) : projects.length === 0 ? (
-                  <>
-                    <p>Your library is empty.</p>
-                    <button className="primary-button" onClick={() => void createProject()}>
-                      <PlusIcon /> New Project
-                    </button>
-                  </>
-                ) : archiveOpen ? (
-                  <p>Nothing from the archive is open.</p>
-                ) : (
-                  <>
-                    <p>{section === 'notes' ? 'No note selected.' : 'No sheet selected.'}</p>
-                    <button className="primary-button" onClick={() => void createSheet()}>
-                      <PlusIcon /> New {SECTION_NAMES[section].item}
-                    </button>
-                  </>
-                )}
-              </div>
-            )
-          )}
+        <div className={`editor-split ${prefs.split}`}>
+          {/* A phone shows one pane at a time: the one being worked in. */}
+          {(compact ? [activePane] : panes).map((pane, i) => (
+            <Fragment key={pane.id}>
+              {i > 0 && (
+                <div
+                  className="split-divider"
+                  role="separator"
+                  aria-orientation={prefs.split === 'row' ? 'vertical' : 'horizontal'}
+                  onPointerDown={resizeSplit}
+                  onDoubleClick={() => setPrefs((p) => ({ ...p, splitRatio: 0.5 }))}
+                />
+              )}
+              {renderPane(pane, i)}
+            </Fragment>
+          ))}
         </div>
 
         {formatBar && (
           <FormatBar
             format={sheetFormat}
             element={element}
-            onRun={(command) => editor.current?.run(command)}
-            onDone={() => editor.current?.blur()}
+            onRun={(command) => activeEditor()?.run(command)}
+            onDone={() => activeEditor()?.blur()}
           />
         )}
 
         {current && !(compact && formatBar) && (
           <footer className="status-bar">
-            {element && !onCanvas && !prefs.preview && !conflicted && (
+            {element && !onCanvas && !preview && !conflicted && (
               <ElementPicker
                 element={element}
                 compact={compact}
                 onPick={(type) => {
-                  editor.current?.run(setScreenplayElement(type))
-                  editor.current?.focus()
+                  activeEditor()?.run(setScreenplayElement(type))
+                  activeEditor()?.focus()
                 }}
               />
             )}

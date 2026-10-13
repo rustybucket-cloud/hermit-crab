@@ -752,6 +752,142 @@ button {
   }
 }
 
+/* The editor's panes: one, or two side by side or one above the other. */
+.editor-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.editor-split.column {
+  flex-direction: column;
+}
+
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Split, the panes start below the toolbar rather than under it, each with a header of its own. */
+.editor.split .editor-split {
+  margin-top: 52px;
+}
+
+.editor.split .conflict-banner,
+.editor.split .archive-banner {
+  margin-top: 0;
+}
+
+.editor.split .editor-host .cm-editor .cm-scroller {
+  padding-top: 0;
+}
+
+.editor.split .preview {
+  padding-top: 32px;
+}
+
+.editor-pane-header {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 30px;
+  line-height: 30px;
+  padding: 0 4px 0 16px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.editor-pane-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.editor-pane-place {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+/* Below the line between the panes, that line is border enough. */
+.split-divider + .editor-pane > .editor-pane-header {
+  border-top: none;
+}
+
+/* The pane being worked in reads a little stronger. */
+.editor-pane.active .editor-pane-header {
+  color: var(--text-soft);
+}
+
+.editor-pane.active .editor-pane-title {
+  color: var(--text);
+}
+
+.editor-pane-header .icon-button {
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.editor-pane-header .icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.editor-pane-header:hover .icon-button,
+.editor-pane-header .icon-button:focus-visible {
+  opacity: 1;
+}
+
+.focus-mode .editor-pane-header {
+  opacity: 0.5;
+  transition: opacity 300ms ease;
+}
+
+.focus-mode .editor-pane-header:hover {
+  opacity: 1;
+}
+
+.split-divider {
+  flex: none;
+  width: 1px;
+  background: var(--border-strong);
+  position: relative;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.editor-split.column > .split-divider {
+  width: auto;
+  height: 1px;
+  cursor: row-resize;
+}
+
+/* A wider grip than the line it draws. */
+.split-divider::after {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.editor-split.column > .split-divider::after {
+  inset: -4px 0;
+}
+
 .editor-body {
   flex: 1;
   min-height: 0;
@@ -2625,6 +2761,22 @@ button {
 .platform-ios .editor-host .cm-editor .cm-scroller,
 .platform-ios .preview-scroller {
   padding-top: calc(24px + env(safe-area-inset-top));
+}
+
+.platform-ios .editor.split .editor-split {
+  margin-top: calc(52px + env(safe-area-inset-top));
+}
+
+.platform-ios .editor.split .editor-host .cm-editor .cm-scroller,
+.platform-ios .editor.split .preview-scroller {
+  padding-top: 0;
+}
+
+/* No hover, so the close button stays in sight. */
+.platform-ios .editor-pane-header .icon-button {
+  width: 28px;
+  height: 28px;
+  opacity: 0.8;
 }
 
 /* Bigger targets for fingers. */
