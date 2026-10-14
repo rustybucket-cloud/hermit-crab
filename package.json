@@ -1,7 +1,7 @@
 {
   "name": "hermit-crab",
   "productName": "HermitCrab Writing",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A calm, markdown-based writing app with projects.",
   "main": "./out/main/index.js",
   "author": "rustybucket-cloud",
