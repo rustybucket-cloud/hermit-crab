@@ -63,10 +63,15 @@ const api: HermitApi = {
   finishMerge: () => ipcRenderer.invoke('sync:finish-merge'),
   resolveWithAgent: () => ipcRenderer.invoke('sync:agent'),
   cancelAgent: () => ipcRenderer.invoke('sync:cancel-agent'),
+  getAppInfo: () => ipcRenderer.invoke('app:info'),
+  getUpdateState: () => ipcRenderer.invoke('update:state'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
 
   onSyncState: (listener) => subscribe('sync:state', listener),
   onSyncChanged: (listener) => subscribe('sync:changed', listener),
   onAgentOutput: (listener) => subscribe('sync:agent-output', listener),
+  onUpdateState: (listener) => subscribe('update:state', listener),
 
   onSyncFlush(listener) {
     const handler = async (_: Electron.IpcRendererEvent, id: number) => {

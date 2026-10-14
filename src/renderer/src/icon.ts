@@ -43,7 +43,7 @@ function tilePath(): Path2D {
 }
 
 /** The app icon as a PNG data URL, with the tile filled in `background`. */
-async function renderIcon(background: string): Promise<string> {
+export async function renderIcon(background: string): Promise<string> {
   const img = await loadCrab()
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = OUTPUT

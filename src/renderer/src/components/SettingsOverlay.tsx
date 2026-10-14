@@ -13,6 +13,7 @@ import {
   type ThemeSettings
 } from '../theme'
 import type { SyncState } from '../../../shared/types'
+import { AboutSettings } from './AboutSettings'
 import { CloseIcon, PlusIcon } from './Icons'
 import { LibrarySettings } from './LibrarySettings'
 import { SyncSettings } from './SyncSettings'
@@ -20,13 +21,14 @@ import { WritingSettings, type GrammarPrefs } from './WritingSettings'
 
 const hermit = window.hermit
 
-export type SettingsTab = 'appearance' | 'writing' | 'library' | 'sync'
+export type SettingsTab = 'appearance' | 'writing' | 'library' | 'sync' | 'about'
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'writing', label: 'Writing' },
   { id: 'library', label: 'Library' },
-  { id: 'sync', label: 'Sync' }
+  { id: 'sync', label: 'Sync' },
+  { id: 'about', label: 'About' }
 ]
 
 interface Props {
@@ -116,7 +118,9 @@ export function SettingsOverlay({
         </header>
 
         <div className="settings-body">
-          {tab === 'sync' ? (
+          {tab === 'about' ? (
+            <AboutSettings iconBackground={colors.sheets} />
+          ) : tab === 'sync' ? (
             <SyncSettings sync={sync} onOpenMerge={onOpenMerge} />
           ) : tab === 'library' ? (
             <LibrarySettings />

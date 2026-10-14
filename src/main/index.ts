@@ -20,7 +20,14 @@ import { exportDocument } from './export'
 import { nodeFs } from './node-fs'
 import { normalizeSyncSettings } from '../shared/sync'
 import { GitSync } from './sync'
-import { checkForUpdatesNow, isInstallingUpdate, startUpdater } from './updater'
+import {
+  checkForUpdates,
+  checkForUpdatesNow,
+  getUpdateState,
+  installUpdate,
+  isInstallingUpdate,
+  startUpdater
+} from './updater'
 
 interface Settings {
   libraryPath?: string
@@ -624,6 +631,11 @@ function registerIpc(): void {
   ipcMain.handle('sync:agent', () => sync.resolveWithAgent())
   ipcMain.handle('sync:cancel-agent', () => sync.cancelAgent())
 
+  ipcMain.handle('app:info', () => ({ name: app.name, version: app.getVersion() }))
+  ipcMain.handle('update:state', () => getUpdateState())
+  ipcMain.handle('update:check', () => checkForUpdates())
+  ipcMain.handle('update:install', () => installUpdate())
+
   ipcMain.handle('context-menu', (event, entries: ContextMenuEntry[], at?: { x: number; y: number }) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
     return new Promise<string | null>((resolve) => {
@@ -659,7 +671,9 @@ app.whenReady().then(async () => {
   buildMenu()
   createWindow()
   void sync.start()
-  startUpdater(closeMainWindow)
+  startUpdater(closeMainWindow, (state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:state', state)
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

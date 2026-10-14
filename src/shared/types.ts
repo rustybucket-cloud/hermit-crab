@@ -181,6 +181,24 @@ export interface ConflictFile {
   content: string
 }
 
+export interface AppInfo {
+  name: string
+  version: string
+  /** The build number, where it differs from the version, such as on iOS. */
+  build?: string
+}
+
+/** Where the app is with updating itself. */
+export type UpdateState =
+  /** This copy can't update itself, such as in development or on iOS, where the App Store updates it. */
+  | { status: 'unavailable'; message: string }
+  | { status: 'idle'; checkedAt: number | null }
+  | { status: 'checking' }
+  | { status: 'downloading'; version: string; percent: number | null }
+  /** Downloaded, and installs on restart. */
+  | { status: 'ready'; version: string }
+  | { status: 'error'; message: string }
+
 /** The API the preload script exposes to the renderer as `window.hermit`. */
 export interface HermitApi {
   platform: string
@@ -282,6 +300,13 @@ export interface HermitApi {
   /** Main asks the renderer to save unsaved edits before it commits or merges. */
   onSyncFlush(listener: () => Promise<void>): () => void
   onAgentOutput(listener: (chunk: string) => void): () => void
+  getAppInfo(): Promise<AppInfo>
+  getUpdateState(): Promise<UpdateState>
+  /** Look for a newer version, which downloads in the background. Resolves once the check is done. */
+  checkForUpdates(): Promise<UpdateState>
+  /** Restart into a downloaded update. */
+  installUpdate(): Promise<void>
+  onUpdateState(listener: (state: UpdateState) => void): () => void
   onMenu(listener: (action: MenuAction) => void): () => void
   onBeforeClose(listener: () => Promise<void>): () => void
 }

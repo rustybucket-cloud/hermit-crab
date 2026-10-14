@@ -3,7 +3,15 @@ import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
 import { Collections, FIRST_COLLECTION, Library } from '../shared/library'
 import { normalizeSyncSettings } from '../shared/sync'
-import type { CollectionList, ExportFormat, HermitApi, MenuAction, SyncSettings, SyncState } from '../shared/types'
+import type {
+  CollectionList,
+  ExportFormat,
+  HermitApi,
+  MenuAction,
+  SyncSettings,
+  SyncState,
+  UpdateState
+} from '../shared/types'
 import { createWelcomeProject } from '../shared/welcome'
 import { exportDocument } from './export'
 import { nativeFs } from './fs'
@@ -44,6 +52,8 @@ const device: 'iPad' | 'iPhone' =
   /iPad/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
     ? 'iPad'
     : 'iPhone'
+
+const APP_STORE_UPDATES: UpdateState = { status: 'unavailable', message: 'The App Store keeps Hermit Crab up to date.' }
 
 function channel<T>() {
   const listeners = new Set<(payload: T) => void>()
@@ -466,6 +476,16 @@ export function createMobileApi(): HermitApi {
       throw new Error('Conflict helpers run on a computer, not on iOS.')
     },
     cancelAgent: async () => {},
+
+    async getAppInfo() {
+      const { name, version, build } = await App.getInfo()
+      return { name, version, build }
+    },
+    // The App Store keeps the app up to date.
+    getUpdateState: async () => APP_STORE_UPDATES,
+    checkForUpdates: async () => APP_STORE_UPDATES,
+    installUpdate: async () => {},
+    onUpdateState: () => () => {},
 
     onSyncState: (listener) => syncStates.on(listener),
     onSyncChanged: (listener) => syncChanged.on(listener),
